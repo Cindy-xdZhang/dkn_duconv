@@ -34,7 +34,10 @@ PAD_token = 2
 MAX_TITLE_LENGTH=20
 KGE_METHOD = 'TransE'
 ENTITY_EMBEDDING_DIM = 50
-#this is the first step! 把多轮对话拆成多个单轮对话
+
+
+# 把多轮对话拆成多个单轮对话
+#可单独使用， 也被集成到了data_preprocess中
 def convert_session_to_sample(session_file, sample_file):
     """
     convert_session_to_sample
@@ -59,7 +62,6 @@ def convert_session_to_sample(session_file, sample_file):
                 fout.write(sample + "\n")
 
     fout.close()
-
 class Vocabulary:
     def __init__(self, name):
         self.name = name
@@ -262,20 +264,7 @@ def prepare_for_transX(data,triple_out='triple2id.txt', relation_out='relation2i
     for i, entity in enumerate(data.entity_list):
         writer_entity.write('%s\t%d\n' % (entity, i))#relation2id
     print('entity size: %d' % data.entity_cnt)
-#tokenize数字并根据词汇表把src\tgt\cue文本串（chatpath+knowledge+":"+history\ response\ KG cue）转为数字串
-def tokenize(self, tokens): 
-    """ map tokens to ids """
-    if isinstance(tokens, str): 
-        tokens = re.sub('\d+', '<num>', tokens).lower()
-        toks = tokens.split(' ')
-        toks_ids = [self.vocab_dict.get('<bos>')] + \
-                [self.vocab_dict.get(tok, self.vocab_dict.get('<unk>'))
-                            for tok in toks] + \
-                [self.vocab_dict.get('<eos>')]
-        return toks_ids
-    elif isinstance(tokens, list):
-        tokens_list = [self.tokenize(t) for t in tokens]
-        return tokens_list
+
 def build_training_data():
     train_path=os.path.join("data","duconv","train.txt")
     train_data=parse_json_txtfile(train_path)     
@@ -289,4 +278,99 @@ def process_for_KGE():
     pass
 
 
-#TODO:完成tokennize    在sample后建立词汇表以前   2020.0202
+#TODO:完成泛化   在sample后建立词汇表以前   2020.0202
+def tokenize(tokens):
+    """
+    tokenize
+    print(tokenize("1999年5月"))-><num>年<num>月
+    print(tokenize([["1999年5月","1929年5月","1991年3月"],["1999年5月","1929年5月","1991年3月"]]))
+    """
+    #数字替换为<num>
+    if isinstance(tokens, str): 
+        s = re.sub('\d+', '<num>', tokens).lower()
+        return s
+    elif isinstance(tokens, list):
+        tokens_list = [tokenize(t) for t in tokens]
+        return tokens_list
+
+#实现了data_preprocess, 整合sample和泛化步骤，
+# tokenize也重新适应，另外我发现
+# 1：tokenize最好到建立vocabulary时再用，text.txt中又泛化又tokenize，对话完全没意义了，因此目前的sample+泛化输出应该有数字
+# ，下一步建立词汇表的时候再tokenize。
+#2.dkn 中泛化后文本不再以json形式存储，而是以一个长字符串加分隔符做全部数据。我暂且保留了json格式，在json格式基础上实现泛化
+def data_preprocess(path_raw,text_file,topic_file,topic_generalization=True):
+    def generize(tokens,value, key):
+        """
+        generize
+        """
+        #数字替换为<num>
+        if isinstance(tokens, str): 
+            s = tokens.replace(value, key)
+            return s
+        elif isinstance(tokens, list):
+            tokens_list = [generize(t,value, key) for t in tokens]
+            return tokens_list
+    def sample_and_generize(path_raw,text_file,topic_file,topic_generalization=True):
+        with open(path_raw, 'r', encoding='utf-8') as f:
+            fout_text = open(text_file, 'w',encoding='utf-8')
+            fout_topic = open(topic_file, 'w',encoding='utf-8')
+            #每一行也是一条独立的记录
+            for i, line in enumerate(f):
+                session = json.loads(line.strip(), encoding="utf-8", \
+                                            object_pairs_hook=collections.OrderedDict)
+                conversation = session["conversation"]
+
+                for j in range(0, len(conversation), 2):
+                    sample = collections.OrderedDict()
+                    sample["goal"] = session["goal"]
+                    sample["knowledge"] = session["knowledge"]
+                    sample["history"] = conversation[:j]
+                    sample["response"] = conversation[j]
+
+                    # response = sample["response"] if "response" in sample else "null"
+                    
+                    topic_a =  sample["goal"][0][1]
+                    topic_b =  sample["goal"][0][2]
+                    for i, [s, p, o] in enumerate(sample["knowledge"]):
+                        if u"领域" == p:
+                            if topic_a == s:
+                                domain_a = o
+                            elif topic_b == s:
+                                domain_b = o
+
+                    topic_dict = {}
+                    if u"电影" == domain_a:
+                        topic_dict["video_topic_a"] = topic_a
+                    else:
+                        topic_dict["person_topic_a"] = topic_a
+
+                    if u"电影" == domain_b:
+                        topic_dict["video_topic_b"] = topic_b
+                    else:
+                        topic_dict["person_topic_b"] = topic_b
+                    if topic_generalization:
+                        topic_list = sorted(topic_dict.items(), key=lambda item: len(item[1]), reverse=True)
+                        for key, value in topic_list:
+                            sample["goal"] = generize(sample["goal"],value, key)
+                            sample["knowledge"] =  generize(sample["knowledge"],value, key)
+                            sample["history"] =  generize(sample["history"],value, key) 
+                            sample["response"] =  generize(sample["response"],value, key)
+                            # model_text = model_text.replace(value, key)     
+
+                    topic_dict = json.dumps(topic_dict, ensure_ascii=False)
+                    model_text=json.dumps(sample, ensure_ascii=False)
+                    fout_text.write(model_text + "\n")
+                    fout_topic.write(topic_dict + "\n")
+            fout_text.close()
+            fout_topic.close()
+    
+    
+    sample_and_generize(path_raw,text_file,topic_file,topic_generalization)
+  
+                
+
+
+path_sample=os.path.join("data","duconv","train.txt")
+path_sample2=os.path.join("data","duconv","text.train.txt")
+path_sample3=os.path.join("data","duconv","topic.train.txt")
+data_preprocess(path_sample,path_sample2,path_sample3)
