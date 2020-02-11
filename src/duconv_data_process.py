@@ -4,6 +4,7 @@ import numpy as np
 import json
 import random
 import collections
+import gensim
 """
 1. Dialogue Goal（goal）:
 It contains two or three lines: the first contains the given dialogue path i.e., 
@@ -188,13 +189,13 @@ def word_index(train_data):
     voc = Vocabulary("duconv_words")
     for conversation in conversations:
         for Isentence in conversation:
-            voc.addSentence(Isentence)
+            voc.addSentence(tokenize(Isentence))
     # print("Counted words in conversation:", voc.n_words)
-    # knowledges=[item["knowledge"] for item in train_data]
-    # for knowledge in knowledges:
-    #     for Isentence in knowledge:
-    #          for sentence in Isentence:
-    #             voc.addSentence(sentence)      
+    knowledges=[item["knowledge"] for item in train_data]
+    for knowledge in knowledges:
+        for Isentence in knowledge:
+             for sentence in Isentence:
+                voc.addSentence(tokenize(sentence))
     print("Counted words in conversations and knowledges:", voc.n_words)
     return voc
 #entity_index(Uniq_ID)
@@ -208,22 +209,21 @@ def entity_index(train_data):
     return voc
 #teach you how to use this file
 def _check_KnowledgeList_and_Vocabulary_implementation():
-    path_raw=os.path.join("data","duconv","train.txt")
-    path_sample=os.path.join("data","duconv","sample.train.txt")
+    # path_raw=os.path.join("data","duconv","train.txt")
+    # path_sample=os.path.join("data","duconv","sample.train.txt")
     #convert_session_to_sample(path_raw,path_sample)
-
-    train_data=parse_json_txtfile(path_sample)     
+    path_sample=os.path.join("data","duconv","train.txt")
+    path_sample2=os.path.join("data","duconv","text.train.txt")
+    path_sample3=os.path.join("data","duconv","topic.train.txt")
+    data_preprocess(path_sample,path_sample2,path_sample3)
+    train_data=parse_json_txtfile(path_sample2)     
     voc=word_index(train_data)
-    #!!!!check why sample has around 300 words more than raw conversation
-    # train_data2=parse_json_txtfile(path_raw)     
-    # voc_raw=word_index(train_data2)
-    # print(voc_raw.word2index.keys() - voc.word2index.keys())
-   
+
     knowledge=entity_index(train_data)
-    # for _ in range(5):
-    #     idx=random.randint(1,knowledge.triple_cnt)
-    #     a=knowledge.tripleList[idx]
-    #     print(knowledge.index2entity[a[0]],"r:",knowledge.index2relation[a[1]],"t:",knowledge.index2entity[a[2]])
+    for _ in range(5):
+        idx=random.randint(1,knowledge.triple_cnt)
+        a=knowledge.tripleList[idx]
+        print(knowledge.index2entity[a[0]],"r:",knowledge.index2relation[a[1]],"t:",knowledge.index2entity[a[2]])
 
     idx=random.randint(1,  train_data.__len__())
     conversation=train_data[idx]["history"]
@@ -365,12 +365,17 @@ def data_preprocess(path_raw,text_file,topic_file,topic_generalization=True):
             fout_topic.close()
     
     
-    sample_and_generize(path_raw,text_file,topic_file,topic_generalization)
+    # sample_and_generize(path_raw,text_file,topic_file,topic_generalization)
+    TRAIN_DATA=parse_json_txtfile(text_file)
+    voc=word_index(TRAIN_DATA)
   
                 
 
 
-path_sample=os.path.join("data","duconv","train.txt")
-path_sample2=os.path.join("data","duconv","text.train.txt")
-path_sample3=os.path.join("data","duconv","topic.train.txt")
-data_preprocess(path_sample,path_sample2,path_sample3)
+
+#TODO: 完善词汇表 研究embedding的方案
+#词汇：dkn 词汇embedding用的gensim库单独训练而duconv用的时embedding层。我考虑用后者，在pytorch里好实现
+#知识：dkn 实现了知识库的KGE而duconv 每一个对话仅仅和相关联的知识在一起并且实现了知识泛化，不做KGE，而是直接以三元字符串格式输入；
+#目前的问题：学习对话模式知识肯定要泛化，但泛化后就不能KGE
+#DKN 利用文本背后的知识 挖掘相关联的新闻标题
+#而duconv 作为对话， 研究如何组织对话，对知识进行了泛化。
