@@ -1,3 +1,12 @@
+# -*- encoding: utf-8 -*-
+#'''
+#@file_name    :main.py
+#@description    :
+#@time    :2020/02/12 13:46:28
+#@author    :Cindy, xd Zhang 
+#@version   :0.1
+#'''
+
 import argparse
 import torch
 from torch import nn
@@ -5,8 +14,8 @@ from torch.nn import functional as F
 from torch.autograd import Variable
 USE_CUDA = torch.cuda.is_available()
 
-def model_config():
-    """ model config """
+def arg_config():
+    """ config """
     parser = argparse.ArgumentParser()
 
     # Data CMD参数组
@@ -35,6 +44,7 @@ def model_config():
     # Training / Testing CMD参数组
     train_arg = parser.add_argument_group("Training")
     train_arg.add_argument('-r',"--run_type", type=str, default="train")
+    train_arg.add_argument("--continue", type=str, default="")
     train_arg.add_argument("--init_model", type=str, default="")
     train_arg.add_argument("--optimizer", type=str, default="Adam")
     train_arg.add_argument("--lr", type=float, default=0.0005)
@@ -47,12 +57,8 @@ def model_config():
     gen_arg.add_argument("--beam_size", type=int, default=10)
     gen_arg.add_argument("--max_dec_len", type=int, default=30)
     gen_arg.add_argument("--length_average", type=str2bool, default=True)
-    gen_arg.add_argument("--output", type=str, default="./output/test.result")
-    gen_arg.add_argument("--model_path", type=str, default="./models/best_model/")
-    gen_arg.add_argument("--unk_id", type=int, default=1)
-    gen_arg.add_argument("--bos_id", type=int, default=2)
-    gen_arg.add_argument("--eos_id", type=int, default=3)
-
+    gen_arg.add_argument("--output_path", type=str, default="./output/test.result")
+    gen_arg.add_argument("--best_model_path", type=str, default="./models/best_model/")
     # MISC
     misc_arg = parser.add_argument_group("Misc")
     misc_arg.add_argument('-u', "--use_gpu", type=str2bool, default=True)
@@ -101,7 +107,7 @@ def trainIter():
 
 if __name__ == "__main__":
     #配置解析CMD 参数
-    config = model_config()
+    config = arg_config()
     # 模式： train / test
     run_type = config.run_type
     
