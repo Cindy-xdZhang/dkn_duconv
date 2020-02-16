@@ -2,3 +2,5 @@
 *.npy
 *.model
 *.vec
+*.bz2
+*.tar

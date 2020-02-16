@@ -1,26 +1,57 @@
+# -*- encoding: utf-8 -*-
+#'''
+#@file_name    :network.py
+#@description    :
+#@time    :2020/02/13 12:47:27
+#@author    :Cindy, xd Zhang 
+#@version   :0.1
+#'''
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-USE_CUDA = torch.cuda.is_available()
-device = torch.device("cuda:0" if USE_CUDA else "cpu")
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 class EncoderRNN(nn.Module):
-    def __init__(self, input_size, hidden_size, embedding, n_layers=1, dropout=0):
+    def __init__(self, hidden_size, embedding_size, embedding, n_layers=1, dropout=0):
         super(EncoderRNN, self).__init__()
         self.n_layers = n_layers
         self.hidden_size = hidden_size
         self.embedding = embedding
 
-        self.gru = nn.GRU(hidden_size, hidden_size, n_layers,
-                          dropout=(0 if n_layers == 1 else dropout), bidirectional=True)
+        self.gru_KG = nn.GRU(embedding_size, hidden_size, n_layers,
+                        dropout=(0 if n_layers == 1 else dropout), bidirectional=True,batch_first =False)
+        self.gru_History = nn.GRU(embedding_size, hidden_size, n_layers,
+                        dropout=(0 if n_layers == 1 else dropout), bidirectional=True,batch_first =False)
+        #GRU的 output: (seq_len, batch, hidden*n_dir) ,
+        # hidden_kg=( num_layers * num_directions, batch,hidden_size)
+        # batch first 只影响output 不影响hidden的形状 所以batch first=false格式更统一
+        self.W1=torch.nn.Linear(self.hidden_size*2, self.hidden_size, bias=True)
+        self.W2=torch.nn.Linear(self.hidden_size, self.hidden_size, bias=True)
+        self.PReLU1=torch.nn.PReLU()
+        self.PReLU2=torch.nn.PReLU()
 
-    def forward(self, input_seq, input_lengths, hidden=None):
-        embedded = self.embedding(input_seq)
-        packed = torch.nn.utils.rnn.pack_padded_sequence(embedded, input_lengths)
-        outputs, hidden = self.gru(packed, hidden) # output: (seq_len, batch, hidden*n_dir)
-        outputs, _ = torch.nn.utils.rnn.pad_packed_sequence(outputs)
-        outputs = outputs[:, :, :self.hidden_size] + outputs[:, : ,self.hidden_size:] # Sum bidirectional outputs (1, batch, hidden)
+    def forward(self, input_history_seq,input_history_lengths,input_kg_seq,input_kg_lengths, ):
+        #kg
+        #input_kg_seq_embedded [batchsize, seq,embeddingsize]
+        input_kg_seq_embedded = self.embedding(input_kg_seq)
+        #【seq*batch*embed_dim】
+        input_kg_seq_packed = torch.nn.utils.rnn.pack_padded_sequence(input_kg_seq_embedded, input_kg_lengths,batch_first=False)
+        #GRU的 output: (seq_len, batch, hidden*n_dir) ,
+        # hidden_kg=( num_layers * num_directions, batch,hidden_size)
+        kg_outputs,hidden_kg=self.gru_KG(input_kg_seq_packed, None) 
+
+        kg_outputs, _ = torch.nn.utils.rnn.pad_packed_sequence(kg_outputs,batch_first=False )
+        kg_outputs = kg_outputs[:, :, :self.hidden_size] + kg_outputs[:, : ,self.hidden_size:] # Sum bidirectional outputs ( batch,1, hidden)
+        #history
+        input_history_seq_embedded = self.embedding(input_history_seq)
+        input_history_seq_packed = torch.nn.utils.rnn.pack_padded_sequence(input_history_seq_embedded, input_history_lengths,batch_first=False)
+        his_outputs, hidden_his= self.gru_History(input_history_seq_packed, None)
+        his_outputs, _ = torch.nn.utils.rnn.pad_packed_sequence(his_outputs,batch_first=False)
+        his_outputs = his_outputs[:, :, :self.hidden_size] + his_outputs[:, : ,self.hidden_size:] # Sum bidirectional outputs (batch, 1, hidden)
+        # hidden_kg=(num_layers * num_directions,batch,  hidden_size)
+        concat_hidden=torch.cat((hidden_his, hidden_kg),1).reshape(self.n_layers*2,-1, self.hidden_size*2)
+        hidden=self.PReLU1(self.W1(concat_hidden))
+        outputs=self.PReLU2(self.W2(torch.cat((his_outputs, kg_outputs), 0)))
         return outputs, hidden
 
 class Attn(nn.Module):
@@ -72,7 +103,7 @@ class Attn(nn.Module):
             return energy
 
 class LuongAttnDecoderRNN(nn.Module):
-    def __init__(self, attn_model, embedding, hidden_size, output_size, n_layers=1, dropout=0.1):
+    def __init__(self, attn_model, embedding,embedding_size, hidden_size, output_size, n_layers=1, dropout=0.1):
         super(LuongAttnDecoderRNN, self).__init__()
 
         # Keep for reference
@@ -84,8 +115,9 @@ class LuongAttnDecoderRNN(nn.Module):
 
         # Define layers
         self.embedding = embedding
-        self.embedding_dropout = nn.Dropout(dropout)
-        self.gru = nn.GRU(hidden_size, hidden_size, n_layers, dropout=(0 if n_layers == 1 else dropout))
+        # self.embedding_dropout = nn.Dropout(dropout)
+        self.gru = nn.GRU(embedding_size, hidden_size, n_layers,\
+            dropout=(0 if n_layers == 1 else dropout), batch_first=False)
         self.concat = nn.Linear(hidden_size * 2, hidden_size)
         self.out = nn.Linear(hidden_size, output_size)
 
@@ -95,31 +127,30 @@ class LuongAttnDecoderRNN(nn.Module):
 
     def forward(self, input_seq, last_hidden, encoder_outputs):
         # Note: we run this one step at a time
-
-        # Get the embedding of the current input word (last output word)
-        embedded = self.embedding(input_seq)
-        embedded = self.embedding_dropout(embedded) #[1, 64, 512]
+        embedded = self.embedding(input_seq)#[batch,1,embedding_size]
+        # embedded = self.embedding_dropout(embedded) 
         if(embedded.size(0) != 1):
             raise ValueError('Decoder input sequence length should be 1')
 
         # Get current hidden state from input word and last hidden state
+        #batch_first=True 不影响hidden初始化的格式是(num_layers * num_directions, batch, hidden_size)
         rnn_output, hidden = self.gru(embedded, last_hidden)
 
         # Calculate attention from current RNN state and all encoder outputs;
         # apply to encoder outputs to get weighted average
-        attn_weights = self.attn(rnn_output, encoder_outputs) #[64, 1, 14]
-        # encoder_outputs [14, 64, 512]
-        context = attn_weights.bmm(encoder_outputs.transpose(0, 1)) #[64, 1, 512]
+        attn_weights = self.attn(rnn_output, encoder_outputs) #[batchsize, 1, 14]
+        # encoder_outputs [seq, batchsize, hiddensize]
+        context = attn_weights.bmm(encoder_outputs.transpose(0, 1)) #[batchsize, 1, hiddensize]
 
         # Attentional vector using the RNN hidden state and context vector
         # concatenated together (Luong eq. 5)
-        rnn_output = rnn_output.squeeze(0) #[64, 512]
-        context = context.squeeze(1) #[64, 512]
+        rnn_output = rnn_output.squeeze(0) #[batchsize, hiddensize]
+        context = context.squeeze(1) #[batchsize4, hiddensize]
         concat_input = torch.cat((rnn_output, context), 1) #[64, 1024]
         concat_output = torch.tanh(self.concat(concat_input)) #[64, 512]
 
         # Finally predict next token (Luong eq. 6, without softmax)
-        output = self.out(concat_output) #[64, output_size]
+        output = self.out(concat_output) #[batchsize, output_size(vocabularysize)]
 
         # Return final output, hidden state, and attention weights (for visualization)
         return output, hidden, attn_weights

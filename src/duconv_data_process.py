@@ -8,7 +8,7 @@
 #'''
 
 
-
+import re
 import os
 import json
 import collections
@@ -36,6 +36,7 @@ DKN中，把kg.txt(rawID) 利用类似词汇表的方式，统计三元组、关
 triple2id.txt(Uniq_ID triple+relationID),relation2id.txt(relation2id),entity2id.txt(Uniq_ID2entity); 
 test.txt也要建立词汇表
 """
+
 #把多轮对话拆成多个单轮对话
 #可单独使用，也被集成到了data_preprocess中
 def convert_session_to_sample(session_file, sample_file):
@@ -68,12 +69,29 @@ def convert_session_to_sample(session_file, sample_file):
 # ，下一步建立词汇表的时候再tokenize。（其实好像也无所谓，DUCONV自己跑出来的就是没有实际数字的对话。。）
 #2.dkn 中泛化后文本不再以json形式存储，而是以一个长字符串加分隔符做全部数据。而我暂且保留了json格式，在json格式基础上实现泛化
 def data_preprocess(path_raw,text_file,topic_file,topic_generalization=True):
+    # tokenize数字
+    # tokenize<<xx>> 2020.0212
+    # tokenize在sample、泛化后，在建立词汇表以前   2020.0202
+    def tokenize(tokens):
+        """
+        tokenize
+        print(tokenize("1999年5月"))-><num>年<num>月
+        print(tokenize([["1999年5月","1929年5月","1991年3月"],["1999年5月","1929年5月","1991年3月"]]))
+        """
+        #整数、小数均替换为<num>
+        if isinstance(tokens, str): 
+            s = re.sub('\d+', '<num>', tokens)
+            s = re.sub('\<num>\.<num>', '<num>', s)
+            s= re.sub('\《.+》','<works>',s)
+            return s
+        elif isinstance(tokens, list):
+            tokens_list = [tokenize(t) for t in tokens]
+            return tokens_list
     #泛化topic的原子操作
     def generize(tokens,value, key):
         """
         generize
         """
-        #数字替换为<num>
         if isinstance(tokens, str): 
             s = tokens.replace(value, key)
             return s
@@ -122,10 +140,10 @@ def data_preprocess(path_raw,text_file,topic_file,topic_generalization=True):
                     if topic_generalization:
                         topic_list = sorted(topic_dict.items(), key=lambda item: len(item[1]), reverse=True)
                         for key, value in topic_list:
-                            sample["goal"] = generize(sample["goal"],value, key)
-                            sample["knowledge"] =  generize(sample["knowledge"],value, key)
-                            sample["history"] =  generize(sample["history"],value, key) 
-                            sample["response"] =  generize(sample["response"],value, key)
+                            sample["goal"] = tokenize(generize(sample["goal"],value, key))
+                            sample["knowledge"] = tokenize(generize(sample["knowledge"],value, key))
+                            sample["history"] =  tokenize(generize(sample["history"],value, key))
+                            sample["response"] =  tokenize(generize(sample["response"],value, key))
                             # model_text = model_text.replace(value, key)     
 
                     topic_dict = json.dumps(topic_dict, ensure_ascii=False)
