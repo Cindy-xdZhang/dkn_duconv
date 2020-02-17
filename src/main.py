@@ -15,7 +15,7 @@ from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader
 from data_loader import My_dataset
 from utils import *
-from network import *
+import network 
 USE_CUDA = torch.cuda.is_available() 
 
 def collate_fn(batch):
@@ -80,26 +80,27 @@ def build_models(voc,config,checkpoint):
     #embedding在encoder 和decoder外面因为他们共用embedding
     embedding_layer = nn.Embedding(voc_size, WORD_EMBEDDING_DIM)
     embedding_layer.weight.data.copy_(torch.from_numpy(build_embedding(voc)))
-    encoder = EncoderRNN(hidden_size, WORD_EMBEDDING_DIM, embedding_layer, config.n_layers, config.dropout)
+    encoder = network.EncoderRNN(hidden_size, WORD_EMBEDDING_DIM, embedding_layer, config.n_layers, config.dropout)
     attn_model = config.attn
 
-    decoder = LuongAttnDecoderRNN(attn_model, embedding_layer,WORD_EMBEDDING_DIM, hidden_size, voc_size,\
+    decoder = network.LuongAttnDecoderRNN(attn_model, embedding_layer,WORD_EMBEDDING_DIM, hidden_size, voc_size,\
         config.n_layers, config.dropout)
     if checkpoint != None:
         encoder.load_state_dict(checkpoint['en'])
         decoder.load_state_dict(checkpoint['de'])
     if config.use_gpu and USE_CUDA:
-        device = torch.device("cuda:0" )
+        network.Global_device = torch.device("cuda:0" )
         print('**Train with GPU **')
     else:
-        device = torch.device("cpu")
+        network.Global_device = torch.device("cpu")
         print('**Train with CPU **')
-    encoder = encoder.to(device)
-    decoder = decoder.to(device)
+    encoder = encoder.to(network.Global_device)
+    decoder = decoder.to(network.Global_device)
+    embedding_layer=embedding_layer.to(network.Global_device)
     return encoder,decoder
 
 def save_checkpoint(epoch,n_layer,hidden_size,attn):
-    save_directory = os.path.join("dkn_duconv", "saved_models",'L{}_H{}_'.format(n_layer,hidden_size)+attn)
+    save_directory = os.path.join("dkn_duconv", "saved_models",'L{}_H{}_'.format(n_layer,hidden_size)+attn+".tar")
     if not os.path.exists(save_directory):
                 os.makedirs(save_directory)
     save_path= os.path.join(save_directory,'Epo{}.tar'.format(epoch))
@@ -155,7 +156,7 @@ def trainIter(train_handler):
         responses,len_responses=padding_sort_transform(responses)
         if config.use_gpu and USE_CUDA: 
             history,knowledge,responses,len_history,len_knowledge,len_responses = history.cuda() ,\
-                knowledge.cuda() ,responses.cuda(),len_history.cuda(),len_knowledge.cuda(),len_responses.cuda()     
+                knowledge.cuda() ,responses.cuda(),len_history.cuda(),len_knowledge.cuda(),len_responses.cuda()    
         #清空梯度
         encoder_optimizer.zero_grad()
         decoder_optimizer.zero_grad()
@@ -164,7 +165,7 @@ def trainIter(train_handler):
         encoder_outputs, encoder_hidden = encoder(history,len_history,knowledge,len_knowledge)
 
         decoder_input = torch.LongTensor([SOS_token for _ in range(batch_size)]).reshape(1,batch_size) #[batch_size,1]
-        decoder_input = decoder_input.to(device)
+        decoder_input = decoder_input.to(network.Global_device)
         #decoder 不用双向
         decoder_hidden = encoder_hidden[:decoder.n_layers]
         loss=0
@@ -177,7 +178,7 @@ def trainIter(train_handler):
             _, topi = decoder_output.topk(1) # [batch_Size, 1]
 
             decoder_input = torch.LongTensor([topi[i][0] for i in range(batch_size)]).reshape(1,batch_size)
-            decoder_input = decoder_input.to(device)    
+            decoder_input = decoder_input.to(network.Global_device)    
             loss += F.cross_entropy(decoder_output, responses[t+1], ignore_index=PAD_token)
         loss.backward()
         clip = 50.0

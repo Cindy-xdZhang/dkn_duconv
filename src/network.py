@@ -9,7 +9,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+Global_device="cpu"
 
 class EncoderRNN(nn.Module):
     def __init__(self, hidden_size, embedding_size, embedding, n_layers=1, dropout=0):
@@ -75,7 +75,7 @@ class Attn(nn.Module):
 
         # Create variable to store attention energies
         attn_energies = torch.zeros(batch_size, max_len) # B x S
-        attn_energies = attn_energies.to(device)
+        attn_energies = attn_energies.to(Global_device)
 
         # For each batch of encoder outputs
         for b in range(batch_size):
