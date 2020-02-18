@@ -16,6 +16,7 @@ from torch.utils.data import DataLoader
 from data_loader import My_dataset
 from utils import *
 import network 
+import time
 USE_CUDA = torch.cuda.is_available() 
 
 def collate_fn(batch):
@@ -49,7 +50,7 @@ def arg_config():
     net_arg.add_argument("--dropout", type=float, default=0.3)
     # Training / Testing CMD参数组
     train_arg = parser.add_argument_group("Training")
-    train_arg.add_argument("--batch_size", type=int, default=16)
+    train_arg.add_argument("--batch_size", type=int, default=2)
     train_arg.add_argument('-r',"--run_type", type=str, default="train")
     train_arg.add_argument("--continue_training", type=str, default=" ")
     train_arg.add_argument("--optimizer", type=str, default="Adam")
@@ -62,17 +63,15 @@ def arg_config():
     gen_arg.add_argument("--length_average", type=str2bool, default=True)
     gen_arg.add_argument("--output_path", type=str, default="./output/test.result")
     gen_arg.add_argument("--best_model_path", type=str, default="./models/best_model/")
-    gen_arg.add_argument("--save_model_path", type=str, default="models")
+    gen_arg.add_argument("--save_model_path", type=str, default="dkn_duconv/models")
 
     # MISC
     misc_arg = parser.add_argument_group("Misc")
     misc_arg.add_argument('-u', "--use_gpu", type=str2bool, default=False)
     misc_arg.add_argument('-p',"--log_steps", type=int, default=1)
-    misc_arg.add_argument("--save_epoch", type=int, default=1,help='Every save_epochs epoch(s) save checkpoint model ')   
+    misc_arg.add_argument("--save_iteration", type=int, default=5,help='Every save_iteration iteration(s) save checkpoint model ')   
     misc_arg.add_argument('-i',"--data_dir", type=str,  default="C:\\Users\\10718\\PycharmProjects\\dkn_duconv\\duconv_data")
-    misc_arg.add_argument("--voc_save_path", type=str,  default="dkn_duconv")
-    misc_arg.add_argument("--embedding_save_path", type=str,  default="dkn_duconv")
-
+    misc_arg.add_argument("--voc_embedding_save_path", type=str,  default="dkn_duconv")
 
     config = parser.parse_args()
 
@@ -82,7 +81,7 @@ def build_models(voc,config,checkpoint):
     hidden_size=config.hidden_size
     #embedding在encoder 和decoder外面因为他们共用embedding
     embedding_layer = nn.Embedding(voc_size, WORD_EMBEDDING_DIM)
-    embedding_layer.weight.data.copy_(torch.from_numpy(build_embedding(voc,config.embedding_save_path)))
+    embedding_layer.weight.data.copy_(torch.from_numpy(build_embedding(voc,config.voc_embedding_save_path)))
     encoder = network.EncoderRNN(hidden_size, WORD_EMBEDDING_DIM, embedding_layer, config.n_layers, config.dropout)
     attn_model = config.attn
 
@@ -103,11 +102,11 @@ def build_models(voc,config,checkpoint):
     return encoder,decoder
 
 def save_checkpoint(handeler):
-    epoch,start_iteration,train_loader,encoder,decoder,encoder_optimizer,decoder_optimizer,config=train_handler
-    save_directory = os.path.join(config.save_model_path, 'L{}_H{}_'.format(config.n_layer,config.hidden_size)+config.attn+".tar")
+    epoch,start_iteration,train_loader,encoder,decoder,encoder_optimizer,decoder_optimizer,config=handeler
+    save_directory = os.path.join(config.save_model_path, 'L{}_H{}_'.format(config.n_layers,config.hidden_size)+config.attn+".tar")
     if not os.path.exists(save_directory):
                 os.makedirs(save_directory)
-    save_path= os.path.join(save_directory,'Epo{}.tar'.format(epoch))
+    save_path= os.path.join(save_directory,'Epo_{:0>2d}_iter_{:0>5d}.tar'.format(epoch,start_iteration))
     torch.save({
                 'epoch': epoch,
                 'iteration': start_iteration,
@@ -118,7 +117,7 @@ def save_checkpoint(handeler):
             }, save_path)
 def train(config):
     print('-Loading dataset...')
-    DuConv_DataSet=My_dataset(config.run_type,config.data_dir,config.voc_save_path)
+    DuConv_DataSet=My_dataset(config.run_type,config.data_dir,config.voc_embedding_save_path)
     train_loader = DataLoader(dataset=DuConv_DataSet,\
          shuffle=True, batch_size=config.batch_size,drop_last=True,collate_fn=collate_fn)
     print('-Building models...')
@@ -137,16 +136,14 @@ def train(config):
     print_loss = 0
     if checkpoint != None:
         start_iteration = checkpoint['iteration'] + 1
-        perplexity = checkpoint['plt']
         start_epoch= checkpoint['epoch'] + 1
     end_epoch=config.end_epoch
     
     for epoch_id in range(start_epoch, end_epoch):
         train_handler=(epoch_id,start_iteration,train_loader,encoder,decoder,encoder_optimizer,decoder_optimizer,config)
         print('-training epoch '+str(epoch_id)+" ...")
-        trainIter(train_handler)
-        if epoch_id % config.save_epoch == 0:
-            save_checkpoint(train_handler)
+        start_iteration+= trainIter(train_handler)
+        
 
 def trainIter(train_handler):
     epoch,start_iteration,train_loader,encoder,decoder,encoder_optimizer,decoder_optimizer,config=train_handler
@@ -189,20 +186,24 @@ def trainIter(train_handler):
         _ = torch.nn.utils.clip_grad_norm_(decoder.parameters(), clip)
         encoder_optimizer.step()    
         decoder_optimizer.step()  
-        stage_total_loss+=loss.item() 
+        stage_total_loss+=loss.cpu().item() 
         #相当于更新权重值
         if batch_idx % config.log_steps == 0:
             print_loss_avg = (stage_total_loss / config.log_steps)
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}\ttime: {}'.format(
                epoch, batch_idx , len(train_loader),
-               100. * batch_idx / len(train_loader), print_loss_avg))
-            with open('log.txt','a') as f:
-                import time
+               100. * batch_idx / len(train_loader), print_loss_avg, time.asctime(time.localtime(time.time())) ))
+            with open('dkn_duconv/log.txt','a') as f:
                 template=' Train Epoch: {} [{}/{}]\tLoss: {:.6f}\ttime: {}\n'
                 str=template.format(epoch,batch_idx , len(train_loader),print_loss_avg,\
                     time.asctime(time.localtime(time.time())))
                 f.write(str)
             stage_total_loss=0
+
+        if start_iteration % config.save_iteration == 0:
+            save_handler=(epoch,start_iteration,train_loader,encoder,decoder,encoder_optimizer,decoder_optimizer,config)
+            save_checkpoint(save_handler)
+
         start_iteration+=1
 
 def padding_sort_transform(input_sEQ):

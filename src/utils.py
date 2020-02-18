@@ -298,7 +298,7 @@ def build_embedding(Vocabulary=None,voc_embedding_save_dir="dkn_duconv"):
         print('- writing word embeddings finish.')
         return embeddings
     elif os.path.exists(voc_embedding_save_path)==True:
-        print('-load word embeddings from pretrain model...')
+        print('-load word embeddings ...')
         embeddings=np.array(np.load(voc_embedding_save_path))
         print('-load word embeddings finish.')
         return embeddings
