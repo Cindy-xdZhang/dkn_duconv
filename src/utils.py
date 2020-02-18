@@ -21,9 +21,7 @@ EOS_token = 2
 #average # words per utterance	10.6
 MAX_TITLE_LENGTH=20
 WORD_EMBEDDING_DIM=300
-#voc的保存地址
-voc_save_path=os.path.join("dkn_duconv", '{!s}.tar'.format('duconv_voc'))
-voc_embedding_save_path=os.path.join("dkn_duconv", '{!s}.npy'.format('duconv_voc_embedding_'+str(WORD_EMBEDDING_DIM)))
+
 class Vocabulary:
     def __init__(self, name="None"):
         self.name = name
@@ -181,7 +179,8 @@ def parse_json_txtfile(files):
 # 然后split就成了每个字一个词了。比如之前是 2019年10月 变成了  2 0 1 9 年 1 0 月 多个word 。此问题已修正
 #另外raw数据sample后部分句子会被删除（response只取第1 3 5 。。。句，因此比如总共只有四句则第四局会被省略），
 # 因此sample后还是会出现word count下降
-def word_index(train_data):
+def word_index(train_data,voc_save_dir):
+    voc_save_path=os.path.join(voc_save_dir, '{!s}.tar'.format('duconv_voc'))
     if os.path.exists(voc_save_path)==False:
         print("-building voc ....")
         #for raw corpus  item["conversation"]
@@ -203,6 +202,7 @@ def word_index(train_data):
             for sentence in kg:
                 voc.addSentence(sentence)
         print("-Counted words in conversations and knowledges:", voc.n_words)
+        if  os.path.exists(voc_save_dir)==False:os.mkdir(voc_save_dir)
         save(voc,voc_save_path)
         print("-building voc finish.")
     else:
@@ -271,7 +271,7 @@ def _check_KnowledgeList_and_Vocabulary_implementation():
     #     print(int_conv)
     #     recover_conv= voc.idx2sentence(int_conv)  
     #     print(recover_conv)
-def build_embedding(Vocabulary=None):
+def build_embedding(Vocabulary=None,voc_embedding_save_dir="dkn_duconv"):
     def load_pretrain_SGNS(embeddings):
         with open("dkn_duconv/sgns.wiki.word.txt", 'r', encoding='utf-8') as f:
             embeded_words=0
@@ -285,6 +285,7 @@ def build_embedding(Vocabulary=None):
                     embeded_words+=1
             f.close()
             print("Using sgns Word2Vec："+str(float(embeded_words/Vocabulary.n_words)*100)+ "% words are embedded.")
+    voc_embedding_save_path=os.path.join(voc_embedding_save_dir, '{!s}.npy'.format('duconv_voc_embedding_'+str(WORD_EMBEDDING_DIM)))
     if os.path.exists(voc_embedding_save_path)==False and Vocabulary!=None:
         word2index=Vocabulary.word2index
         print('-getting word embeddings of '+ str(Vocabulary.n_words)  +' words from pretrain model...')
@@ -292,6 +293,7 @@ def build_embedding(Vocabulary=None):
         embeddings = np.ones([len(word2index) , WORD_EMBEDDING_DIM],dtype=float)
         load_pretrain_SGNS(embeddings)
         print('- writing word embeddings ...')
+        if  os.path.exists(voc_embedding_save_dir)==False:os.mkdir(voc_embedding_save_dir)
         np.save(voc_embedding_save_path, embeddings)
         print('- writing word embeddings finish.')
         return embeddings

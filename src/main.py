@@ -49,14 +49,11 @@ def arg_config():
     net_arg.add_argument("--dropout", type=float, default=0.3)
     # Training / Testing CMD参数组
     train_arg = parser.add_argument_group("Training")
-    train_arg.add_argument('-i',"--data_dir", type=str, \
-        default="C:\\Users\\10718\\PycharmProjects\\dkn_duconv\\duconv_data\\",help="the path where save the duconv text.")
     train_arg.add_argument("--batch_size", type=int, default=16)
     train_arg.add_argument('-r',"--run_type", type=str, default="train")
     train_arg.add_argument("--continue_training", type=str, default=" ")
     train_arg.add_argument("--optimizer", type=str, default="Adam")
     train_arg.add_argument("--lr", type=float, default=0.0005)
-    train_arg.add_argument("--grad_clip", type=float, default=5.0)
     train_arg.add_argument("--end_epoch", type=int, default=13)
     # Geneation
     gen_arg = parser.add_argument_group("Generation")
@@ -65,11 +62,17 @@ def arg_config():
     gen_arg.add_argument("--length_average", type=str2bool, default=True)
     gen_arg.add_argument("--output_path", type=str, default="./output/test.result")
     gen_arg.add_argument("--best_model_path", type=str, default="./models/best_model/")
+    gen_arg.add_argument("--save_model_path", type=str, default="models")
+
     # MISC
     misc_arg = parser.add_argument_group("Misc")
     misc_arg.add_argument('-u', "--use_gpu", type=str2bool, default=False)
     misc_arg.add_argument('-p',"--log_steps", type=int, default=1)
     misc_arg.add_argument("--save_epoch", type=int, default=1,help='Every save_epochs epoch(s) save checkpoint model ')   
+    misc_arg.add_argument('-i',"--data_dir", type=str,  default="C:\\Users\\10718\\PycharmProjects\\dkn_duconv\\duconv_data")
+    misc_arg.add_argument("--voc_save_path", type=str,  default="dkn_duconv")
+    misc_arg.add_argument("--embedding_save_path", type=str,  default="dkn_duconv")
+
 
     config = parser.parse_args()
 
@@ -79,7 +82,7 @@ def build_models(voc,config,checkpoint):
     hidden_size=config.hidden_size
     #embedding在encoder 和decoder外面因为他们共用embedding
     embedding_layer = nn.Embedding(voc_size, WORD_EMBEDDING_DIM)
-    embedding_layer.weight.data.copy_(torch.from_numpy(build_embedding(voc)))
+    embedding_layer.weight.data.copy_(torch.from_numpy(build_embedding(voc,config.embedding_save_path)))
     encoder = network.EncoderRNN(hidden_size, WORD_EMBEDDING_DIM, embedding_layer, config.n_layers, config.dropout)
     attn_model = config.attn
 
@@ -99,24 +102,23 @@ def build_models(voc,config,checkpoint):
     embedding_layer=embedding_layer.to(network.Global_device)
     return encoder,decoder
 
-def save_checkpoint(epoch,n_layer,hidden_size,attn):
-    save_directory = os.path.join("dkn_duconv", "saved_models",'L{}_H{}_'.format(n_layer,hidden_size)+attn+".tar")
+def save_checkpoint(handeler):
+    epoch,start_iteration,train_loader,encoder,decoder,encoder_optimizer,decoder_optimizer,config=train_handler
+    save_directory = os.path.join(config.save_model_path, 'L{}_H{}_'.format(config.n_layer,config.hidden_size)+config.attn+".tar")
     if not os.path.exists(save_directory):
                 os.makedirs(save_directory)
     save_path= os.path.join(save_directory,'Epo{}.tar'.format(epoch))
     torch.save({
                 'epoch': epoch,
-                'iteration': iteration,
+                'iteration': start_iteration,
                 'en': encoder.state_dict(),
                 'de': decoder.state_dict(),
                 'en_opt': encoder_optimizer.state_dict(),
                 'de_opt': decoder_optimizer.state_dict(),
-                'loss': loss,
-                'plt': perplexity
             }, save_path)
 def train(config):
     print('-Loading dataset...')
-    DuConv_DataSet=My_dataset(config.run_type,config.data_dir)
+    DuConv_DataSet=My_dataset(config.run_type,config.data_dir,config.voc_save_path)
     train_loader = DataLoader(dataset=DuConv_DataSet,\
          shuffle=True, batch_size=config.batch_size,drop_last=True,collate_fn=collate_fn)
     print('-Building models...')
@@ -140,14 +142,14 @@ def train(config):
     end_epoch=config.end_epoch
     
     for epoch_id in range(start_epoch, end_epoch):
-        train_handler=(epoch_id,train_loader,encoder,decoder,encoder_optimizer,decoder_optimizer,config)
+        train_handler=(epoch_id,start_iteration,train_loader,encoder,decoder,encoder_optimizer,decoder_optimizer,config)
         print('-training epoch '+str(epoch_id)+" ...")
         trainIter(train_handler)
         if epoch_id % config.save_epoch == 0:
-            save_checkpoint(epoch_id,config.n_layer,config.hidden_size,config.attn)
+            save_checkpoint(train_handler)
 
 def trainIter(train_handler):
-    epoch,train_loader,encoder,decoder,encoder_optimizer,decoder_optimizer,config=train_handler
+    epoch,start_iteration,train_loader,encoder,decoder,encoder_optimizer,decoder_optimizer,config=train_handler
     stage_total_loss=0
     batch_size=config.batch_size
     for batch_idx, data in enumerate(train_loader):
@@ -156,8 +158,8 @@ def trainIter(train_handler):
         knowledge,len_knowledge=padding_sort_transform(knowledge)
         responses,len_responses=padding_sort_transform(responses)
         if config.use_gpu and USE_CUDA: 
-            history,knowledge,responses,len_history,len_knowledge,len_responses = history.cuda() ,\
-                knowledge.cuda() ,responses.cuda(),len_history.cuda(),len_knowledge.cuda(),len_responses.cuda()    
+            history,knowledge,responses = history.cuda() ,\
+                knowledge.cuda() ,responses.cuda()
         #清空梯度
         encoder_optimizer.zero_grad()
         decoder_optimizer.zero_grad()
@@ -201,6 +203,7 @@ def trainIter(train_handler):
                     time.asctime(time.localtime(time.time())))
                 f.write(str)
             stage_total_loss=0
+        start_iteration+=1
 
 def padding_sort_transform(input_sEQ):
     """ input:[B x L]batch size 个变长句子TENSOR
