@@ -42,7 +42,7 @@ def arg_config():
     parser = argparse.ArgumentParser()
     # Network CMD参数组
     net_arg = parser.add_argument_group("Network")
-    net_arg.add_argument("--hidden_size", type=int, default=512)
+    net_arg.add_argument("--hidden_size", type=int, default=128)
     net_arg.add_argument("--n_layers", type=int, default=1)
     net_arg.add_argument("--attn", type=str, default='general',
                          choices=['none', 'concat', 'dot', 'general'])
@@ -50,8 +50,8 @@ def arg_config():
     # Training / Testing CMD参数组
     train_arg = parser.add_argument_group("Training")
     train_arg.add_argument('-i',"--data_dir", type=str, \
-        default="C:\\Users\\10718\\PycharmProjects\\data\\duconv\\",help="the path where save the duconv text.")
-    train_arg.add_argument("--batch_size", type=int, default=3)
+        default="C:\\Users\\10718\\PycharmProjects\\dkn_duconv\\duconv_data\\",help="the path where save the duconv text.")
+    train_arg.add_argument("--batch_size", type=int, default=16)
     train_arg.add_argument('-r',"--run_type", type=str, default="train")
     train_arg.add_argument("--continue_training", type=str, default=" ")
     train_arg.add_argument("--optimizer", type=str, default="Adam")
@@ -68,8 +68,8 @@ def arg_config():
     # MISC
     misc_arg = parser.add_argument_group("Misc")
     misc_arg.add_argument('-u', "--use_gpu", type=str2bool, default=False)
-    misc_arg.add_argument('-p',"--log_steps", type=int, default=300)
-    misc_arg.add_argument("--save_epoch", type=int, default=2,help='Every save_epochs epoch(s) save checkpoint model ')   
+    misc_arg.add_argument('-p',"--log_steps", type=int, default=1)
+    misc_arg.add_argument("--save_epoch", type=int, default=1,help='Every save_epochs epoch(s) save checkpoint model ')   
 
     config = parser.parse_args()
 
@@ -141,6 +141,7 @@ def train(config):
     
     for epoch_id in range(start_epoch, end_epoch):
         train_handler=(epoch_id,train_loader,encoder,decoder,encoder_optimizer,decoder_optimizer,config)
+        print('-training epoch '+str(epoch_id)+" ...")
         trainIter(train_handler)
         if epoch_id % config.save_epoch == 0:
             save_checkpoint(epoch_id,config.n_layer,config.hidden_size,config.attn)
