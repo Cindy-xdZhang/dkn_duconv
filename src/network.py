@@ -30,23 +30,25 @@ class EncoderRNN(nn.Module):
         self.PReLU1=torch.nn.PReLU()
         self.PReLU2=torch.nn.PReLU()
 
-    def forward(self, input_history_seq,input_history_lengths,input_kg_seq,input_kg_lengths, ):
+    def forward(self, input_history_seq,input_history_lengths,input_kg_seq,input_kg_lengths, unsort_idxs):
+        unsort_idx_history,unsort_idx_kg=unsort_idxs
         #kg
-        #input_kg_seq_embedded [batchsize, seq,embeddingsize]
+        #input_kg_seq_embedded [seq,batchsize, embeddingsize]
         input_kg_seq_embedded = self.embedding(input_kg_seq)
         #【seq*batch*embed_dim】
         input_kg_seq_packed = torch.nn.utils.rnn.pack_padded_sequence(input_kg_seq_embedded, input_kg_lengths,batch_first=False)
         #GRU的 output: (seq_len, batch, hidden*n_dir) ,
         # hidden_kg=( num_layers * num_directions, batch,hidden_size)
         kg_outputs,hidden_kg=self.gru_KG(input_kg_seq_packed, None) 
-
         kg_outputs, _ = torch.nn.utils.rnn.pad_packed_sequence(kg_outputs,batch_first=False )
+        kg_outputs=kg_outputs.index_select(1,unsort_idx_kg)
         kg_outputs = kg_outputs[:, :, :self.hidden_size] + kg_outputs[:, : ,self.hidden_size:] # Sum bidirectional outputs ( batch,1, hidden)
         #history
         input_history_seq_embedded = self.embedding(input_history_seq)
         input_history_seq_packed = torch.nn.utils.rnn.pack_padded_sequence(input_history_seq_embedded, input_history_lengths,batch_first=False)
         his_outputs, hidden_his= self.gru_History(input_history_seq_packed, None)
         his_outputs, _ = torch.nn.utils.rnn.pad_packed_sequence(his_outputs,batch_first=False)
+        his_outputs=his_outputs.index_select(1,unsort_idx_history)
         his_outputs = his_outputs[:, :, :self.hidden_size] + his_outputs[:, : ,self.hidden_size:] # Sum bidirectional outputs (batch, 1, hidden)
         # hidden_kg=(num_layers * num_directions,batch,  hidden_size)
         concat_hidden=torch.cat((hidden_his, hidden_kg),1).reshape(self.n_layers*2,-1, self.hidden_size*2)
@@ -154,3 +156,4 @@ class LuongAttnDecoderRNN(nn.Module):
 
         # Return final output, hidden state, and attention weights (for visualization)
         return output, hidden, attn_weights
+
