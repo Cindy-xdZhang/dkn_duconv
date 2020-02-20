@@ -6,4 +6,5 @@
 *.tar
 *.gz
 *.pyc
-
+src/__pycache__/*
+.cpython-36.pyc

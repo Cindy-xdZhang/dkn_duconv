@@ -61,9 +61,6 @@ def arg_config():
     gen_arg.add_argument("--beam_size", type=int, default=3)
     gen_arg.add_argument("--max_dec_len", type=int, default=30)
     gen_arg.add_argument("--length_average", type=str2bool, default=True)
-    gen_arg.add_argument("--output_path", type=str, default="./output/test.result")
-    gen_arg.add_argument("--best_model_path", type=str, default="./models/best_model/")
-    gen_arg.add_argument("--save_model_path", type=str, default="dkn_duconv/models")
 
     # MISC
     misc_arg = parser.add_argument_group("Misc")
@@ -72,6 +69,9 @@ def arg_config():
     misc_arg.add_argument("--save_iteration", type=int, default=5,help='Every save_iteration iteration(s) save checkpoint model ')   
     misc_arg.add_argument('-i',"--data_dir", type=str,  default="C:\\Users\\10718\\PycharmProjects\\dkn_duconv\\duconv_data")
     misc_arg.add_argument("--voc_embedding_save_path", type=str,  default="dkn_duconv")
+    misc_arg.add_argument("--output_path", type=str, default="./output/test.result")
+    misc_arg.add_argument("--best_model_path", type=str, default="./models/best_model/")
+    misc_arg.add_argument("--save_model_path", type=str, default="dkn_duconv/models")
 
     config = parser.parse_args()
 
@@ -103,7 +103,7 @@ def build_models(voc,config,checkpoint):
 
 def save_checkpoint(handeler):
     epoch,start_iteration,train_loader,encoder,decoder,encoder_optimizer,decoder_optimizer,config=handeler
-    save_directory = os.path.join(config.save_model_path, 'L{}_H{}_'.format(config.n_layers,config.hidden_size)+config.attn+".tar")
+    save_directory = os.path.join(config.save_model_path, 'L{}_H{}_'.format(config.n_layers,config.hidden_size)+config.attn)
     if not os.path.exists(save_directory):
                 os.makedirs(save_directory)
     save_path= os.path.join(save_directory,'Epo_{:0>2d}_iter_{:0>5d}.tar'.format(epoch,start_iteration))
@@ -205,6 +205,7 @@ def trainIter(train_handler):
             save_checkpoint(save_handler)
 
         start_iteration+=1
+    return len(train_loader)
 
 def padding_sort_transform(input_sEQ):
     """ input:[B x L]batch size 个变长句子TENSOR

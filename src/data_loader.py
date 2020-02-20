@@ -24,14 +24,19 @@ class Dataset(object):
         raise NotImplementedError
 class My_dataset(Dataset):
     # root 是训练集的根目录， mode可选的参数是train，test，validation，分别读取相应的文件夹
-    def __init__(self,  mode="train",dir="C:\\Users\\10718\\PycharmProjects\\data\\duconv\\",voc_save_path="dkn_duconv/duconv_voc.tar"):
+    def __init__(self,  mode="train",dir="C:\\Users\\10718\\PycharmProjects\\dkn_duconv\\duconv_data",voc_save_path="dkn_duconv/duconv_voc.tar"):
         self.mode = mode
         self.dir = dir
         self.data,self.voc, self.n_words=self.build_corpus_data(voc_save_path)
     #学习DUCONV把 每个item多个konwledge三元组 join成空格分隔的一个长句子
     def build_corpus_data(self,voc_save_path):
-        text_path=os.path.join(self.dir,"text."+self.mode+".txt")
-        train_data=parse_json_txtfile(text_path)
+        text_path1=os.path.join(self.dir,"text."+"train"+".txt")
+        text_path2=os.path.join(self.dir,"text."+"dev"+".txt")
+        text_path3=os.path.join(self.dir,"text."+"test"+".txt")
+        train_data=parse_json_txtfile(text_path1)
+        dev_data=parse_json_txtfile(text_path2)
+        test_data=parse_json_txtfile(text_path3)
+        all_data=
         voc=word_index(train_data,voc_save_path)
         for item in train_data:
             item.pop('goal')
@@ -76,7 +81,8 @@ pack_padded_sequence要求变长序列不能长度为0因此对可能为零的hi
 """
 
 
-# my=My_dataset()
+my=My_dataset()
+
 # for id in range(4):
 #     print(my[id])
 

@@ -68,7 +68,7 @@ def convert_session_to_sample(session_file, sample_file):
 # 1：tokenize最好到建立vocabulary时再用，text.txt中又泛化又tokenize，对话完全没意义了，因此目前的sample+泛化输出应该有数字
 # ，下一步建立词汇表的时候再tokenize。（其实好像也无所谓，DUCONV自己跑出来的就是没有实际数字的对话。。）
 #2.dkn 中泛化后文本不再以json形式存储，而是以一个长字符串加分隔符做全部数据。而我暂且保留了json格式，在json格式基础上实现泛化
-def data_preprocess(path_raw,text_file,topic_file,topic_generalization=True):
+def data_preprocess(path_raw,text_file,topic_file,topic_generalization=True,test=False):
     # tokenize数字
     # tokenize<<xx>> 2020.0212
     # tokenize在sample、泛化后，在建立词汇表以前   2020.0202
@@ -104,20 +104,62 @@ def data_preprocess(path_raw,text_file,topic_file,topic_generalization=True):
             fout_text = open(text_file, 'w',encoding='utf-8')
             fout_topic = open(topic_file, 'w',encoding='utf-8')
             #每一行也是一条独立的记录
-            for i, line in enumerate(f):
-                session = json.loads(line.strip(), encoding="utf-8", \
-                                            object_pairs_hook=collections.OrderedDict)
-                conversation = session["conversation"]
+            if test==False:
+                for i, line in enumerate(f):
+                    session = json.loads(line.strip(), encoding="utf-8", \
+                                                object_pairs_hook=collections.OrderedDict)
+                    conversation = session["conversation"]
 
-                for j in range(0, len(conversation), 2):
+                    for j in range(0, len(conversation), 2):
+                        sample = collections.OrderedDict()
+                        sample["goal"] = session["goal"]
+                        sample["knowledge"] = session["knowledge"]
+                        sample["history"] = conversation[:j]
+                        sample["response"] = conversation[j]
+
+                        # response = sample["response"] if "response" in sample else "null"
+                        
+                        topic_a =  sample["goal"][0][1]
+                        topic_b =  sample["goal"][0][2]
+                        for i, [s, p, o] in enumerate(sample["knowledge"]):
+                            if u"领域" == p:
+                                if topic_a == s:
+                                    domain_a = o
+                                elif topic_b == s:
+                                    domain_b = o
+
+                        topic_dict = {}
+                        if u"电影" == domain_a:
+                            topic_dict["video_topic_a"] = topic_a
+                        else:
+                            topic_dict["person_topic_a"] = topic_a
+
+                        if u"电影" == domain_b:
+                            topic_dict["video_topic_b"] = topic_b
+                        else:
+                            topic_dict["person_topic_b"] = topic_b
+                        if topic_generalization:
+                            topic_list = sorted(topic_dict.items(), key=lambda item: len(item[1]), reverse=True)
+                            for key, value in topic_list:
+                                sample["goal"] = tokenize(generize(sample["goal"],value, key))
+                                sample["knowledge"] = tokenize(generize(sample["knowledge"],value, key))
+                                sample["history"] =  tokenize(generize(sample["history"],value, key))
+                                sample["response"] =  tokenize(generize(sample["response"],value, key))
+                                # model_text = model_text.replace(value, key)     
+
+                        topic_dict = json.dumps(topic_dict, ensure_ascii=False)
+                        model_text=json.dumps(sample, ensure_ascii=False)
+                        fout_text.write(model_text + "\n")
+                        fout_topic.write(topic_dict + "\n")
+            else:
+                for i, line in enumerate(f):
+                    session = json.loads(line.strip(), encoding="utf-8", \
+                                                object_pairs_hook=collections.OrderedDict)
                     sample = collections.OrderedDict()
                     sample["goal"] = session["goal"]
                     sample["knowledge"] = session["knowledge"]
-                    sample["history"] = conversation[:j]
-                    sample["response"] = conversation[j]
-
-                    # response = sample["response"] if "response" in sample else "null"
-                    
+                    sample["history"] = session["history"]
+                    sample["response"] = session["response"]
                     topic_a =  sample["goal"][0][1]
                     topic_b =  sample["goal"][0][2]
                     for i, [s, p, o] in enumerate(sample["knowledge"]):
@@ -150,16 +192,20 @@ def data_preprocess(path_raw,text_file,topic_file,topic_generalization=True):
                     model_text=json.dumps(sample, ensure_ascii=False)
                     fout_text.write(model_text + "\n")
                     fout_topic.write(topic_dict + "\n")
+
+
             fout_text.close()
             fout_topic.close()
+
     sample2multi_generize_topic(path_raw,text_file,topic_file,topic_generalization)
+
 
 if __name__ == "__main__":
     try:
         # data_preprocess(sys.argv[1],sys.argv[2],sys.argv[3])
-        path_sample=os.path.join("data","duconv","train.txt")
-        path_sample2=os.path.join("data","duconv","text.train.txt")
-        path_sample3=os.path.join("data","duconv","topic.train.txt")
-        data_preprocess(path_sample,path_sample2,path_sample3)
+        path_sample=os.path.join("dkn_duconv","duconv_data","test_1.txt")
+        path_sample2=os.path.join("dkn_duconv","duconv_data","text.test.txt")
+        path_sample3=os.path.join("dkn_duconv","duconv_data","topic.test.txt")
+        data_preprocess(path_sample,path_sample2,path_sample3,test=True)
     except KeyboardInterrupt:
         print("\nExited from the program ealier!")
