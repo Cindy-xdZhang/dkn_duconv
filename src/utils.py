@@ -12,6 +12,7 @@ import json
 import random
 import numpy as np
 from torch import load,save
+from torch.nn.utils.rnn import pad_sequence
 #Vocabulary中的token标号
 PAD_token = 0
 SOS_token = 1
@@ -219,24 +220,6 @@ def entity_index(train_data):
                 voc.addknowledge(triple)      
     print("-Counted triples:", voc.triple_cnt,"\nCounted entities",voc.entity_cnt)
     return voc
-#每句话的格式："SOS x x x x EOS PAD PAD PAD"
-#我发现不需要padding了 因为在encoder sentense的时候，每个句子就开辟MAX_TITLE_LENGTH的空间，等于每个句子padding到一样长度了。
-#另外pytorch也提供了API
-def padding_idx_sentense(tokens,LENGTH=MAX_TITLE_LENGTH,padding_token=PAD_token):
-    if isinstance(tokens, str): 
-        array = tokens.split(',')
-        BUF=[int(PAD_token)]*MAX_TITLE_LENGTH
-        point = 0
-        for s in array:
-            BUF[point] = int(s)
-            point += 1
-            if point == MAX_TITLE_LENGTH-1:
-                break
-        BUF[point] =int(EOS_token) 
-        return BUF
-    elif isinstance(tokens, list):
-        tokens_list = [padding_idx_sentense(t) for t in tokens]
-        return tokens_list
 #检查
 def _check_KnowledgeList_and_Vocabulary_implementation():
     # path_raw=os.path.join("data","duconv","train.txt")
@@ -285,25 +268,27 @@ def build_embedding(Vocabulary=None,voc_embedding_save_dir="dkn_duconv"):
                     embeded_words+=1
             f.close()
             print("Using sgns Word2Vec："+str(float(embeded_words/Vocabulary.n_words)*100)+ "% words are embedded.")
-    voc_embedding_save_path=os.path.join(voc_embedding_save_dir, '{!s}.npy'.format('duconv_voc_embedding_'+str(WORD_EMBEDDING_DIM)))
-    if os.path.exists(voc_embedding_save_path)==False and Vocabulary!=None:
-        word2index=Vocabulary.word2index
-        print('-getting word embeddings of '+ str(Vocabulary.n_words)  +' words from pretrain model...')
-        corpus=list(word2index.keys())
-        embeddings = np.ones([len(word2index) , WORD_EMBEDDING_DIM],dtype=float)
-        load_pretrain_SGNS(embeddings)
-        print('- writing word embeddings ...')
-        if  os.path.exists(voc_embedding_save_dir)==False:os.mkdir(voc_embedding_save_dir)
-        np.save(voc_embedding_save_path, embeddings)
-        print('- writing word embeddings finish.')
-        return embeddings
-    elif os.path.exists(voc_embedding_save_path)==True:
-        print('-load word embeddings ...')
-        embeddings=np.array(np.load(voc_embedding_save_path))
-        print('-load word embeddings finish.')
-        return embeddings
+    if Vocabulary==None:raise Exception("No vocabulary information available!")
     else:
-        raise Exception("No vocabulary information or previous file available!")
+        voc_embedding_save_path=os.path.join(voc_embedding_save_dir, '{!s}.npy'.format('duconv_voc_embedding_'+str(Vocabulary.n_words)+"_"+str(WORD_EMBEDDING_DIM)))
+        if os.path.exists(voc_embedding_save_path)==False:
+            word2index=Vocabulary.word2index
+            print('-getting word embeddings of '+ str(Vocabulary.n_words)  +' words from pretrain model...')
+            corpus=list(word2index.keys())
+            embeddings = np.ones([len(word2index) , WORD_EMBEDDING_DIM],dtype=float)
+            load_pretrain_SGNS(embeddings)
+            print('- writing word embeddings ...')
+            if  os.path.exists(voc_embedding_save_dir)==False:os.mkdir(voc_embedding_save_dir)
+            np.save(voc_embedding_save_path, embeddings)
+            print('- writing word embeddings finish.')
+            return embeddings
+        elif os.path.exists(voc_embedding_save_path)==True:
+            print('-load word embeddings ...')
+            embeddings=np.array(np.load(voc_embedding_save_path))
+            print('-load word embeddings finish.')
+            return embeddings
+        else:
+            raise Exception("Unknown Exception when build_embedding !")
 
 def str2bool(v):
     """ str2bool """
@@ -314,5 +299,34 @@ def str2bool(v):
     else:
         raise argparse.ArgumentTypeError('Unsupported value encountered.')
 
-# _check_KnowledgeList_and_Vocabulary_implementation()
-# build_embedding()
+def padding_sort_transform(input_sEQ):
+    """ input:[B x L]batch size 个变长句子TENSOR
+    返回[L*B ]个定长句子TENSOR
+    """
+    input_len=torch.Tensor([len(it) for it in input_sEQ])
+    input_sEQ=pad_sequence(input_sEQ,batch_first=True, padding_value=0)
+    _,idx_sort=torch.sort(input_len,dim=0,descending=True)
+    # _, idx_unsort = torch.sort(idx_sort, dim=0)
+    input_sEQ=input_sEQ.index_select(0,idx_sort)
+    lengths=list(input_len[idx_sort])
+    input_sEQ=input_sEQ.transpose(0, 1)
+    return input_sEQ,lengths
+def collate_fn(batch):
+	# 因为token_list是一个变长的数据，所以需要用一个list来装这个batch的token_list
+    # history_len=torch.Tensor([len(item['history']) for item in batch])
+    # knowledge_len=torch.Tensor([len(item['knowledge']) for item in batch])
+    # response_len=torch.Tensor([len(item['response']) for item in batch])
+    history = [torch.LongTensor(item['history'] )for item in batch]
+    knowledge = [torch.LongTensor(item['knowledge']) for item in batch]
+    response = [torch.LongTensor(item['response']) for item in batch]
+    # response=torch.Tensor(response)
+    # knowledge=torch.Tensor(knowledge)
+    # history=torch.Tensor(history)
+    return {
+        'history': history,
+        'knowledge': knowledge,
+        'response': response,
+        # 'history_len': history_len,
+        # 'knowledge_len': knowledge_len,
+        # 'response_len': response_len,
+    }

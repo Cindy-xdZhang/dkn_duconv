@@ -11,33 +11,13 @@ import torch
 from torch import optim
 from torch import nn
 from torch.nn import functional as F
-from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader
 from data_loader import My_dataset
+import time
 from utils import *
 import network 
-import time
 USE_CUDA = torch.cuda.is_available() 
 
-def collate_fn(batch):
-	# 因为token_list是一个变长的数据，所以需要用一个list来装这个batch的token_list
-    # history_len=torch.Tensor([len(item['history']) for item in batch])
-    # knowledge_len=torch.Tensor([len(item['knowledge']) for item in batch])
-    # response_len=torch.Tensor([len(item['response']) for item in batch])
-    history = [torch.LongTensor(item['history'] )for item in batch]
-    knowledge = [torch.LongTensor(item['knowledge']) for item in batch]
-    response = [torch.LongTensor(item['response']) for item in batch]
-    # response=torch.Tensor(response)
-    # knowledge=torch.Tensor(knowledge)
-    # history=torch.Tensor(history)
-    return {
-        'history': history,
-        'knowledge': knowledge,
-        'response': response,
-        # 'history_len': history_len,
-        # 'knowledge_len': knowledge_len,
-        # 'response_len': response_len,
-    }
 def arg_config():
     """ config """
     parser = argparse.ArgumentParser()
@@ -51,27 +31,27 @@ def arg_config():
     # Training / Testing CMD参数组
     train_arg = parser.add_argument_group("Training")
     train_arg.add_argument("--batch_size", type=int, default=2)
-    train_arg.add_argument('-r',"--run_type", type=str, default="train")
-    train_arg.add_argument("--continue_training", type=str, default=" ")
+    train_arg.add_argument('-r',"--run_type", type=str, default="test")
     train_arg.add_argument("--optimizer", type=str, default="Adam")
     train_arg.add_argument("--lr", type=float, default=0.0005)
     train_arg.add_argument("--end_epoch", type=int, default=13)
-    # Geneation
     gen_arg = parser.add_argument_group("Generation")
     gen_arg.add_argument("--beam_size", type=int, default=3)
-    gen_arg.add_argument("--max_dec_len", type=int, default=30)
-    gen_arg.add_argument("--length_average", type=str2bool, default=True)
-
-    # MISC
+    gen_arg.add_argument("--max_dec_len", type=int, default=25,\
+        help="limit the length of the decoder output sentense.")
+    # MISC ：logs,dirs and gpu config
     misc_arg = parser.add_argument_group("Misc")
     misc_arg.add_argument('-u', "--use_gpu", type=str2bool, default=False)
     misc_arg.add_argument('-p',"--log_steps", type=int, default=1)
     misc_arg.add_argument("--save_iteration", type=int, default=5,help='Every save_iteration iteration(s) save checkpoint model ')   
-    misc_arg.add_argument('-i',"--data_dir", type=str,  default="C:\\Users\\10718\\PycharmProjects\\dkn_duconv\\duconv_data")
-    misc_arg.add_argument("--voc_embedding_save_path", type=str,  default="dkn_duconv")
+    #路径参数
+    misc_arg.add_argument('-i',"--data_dir", type=str,  default="C:\\Users\\10718\\PycharmProjects\\dkn_duconv\\duconv_data",\
+        help="The input text data path.")
+    misc_arg.add_argument("--voc_and_embedding_save_path", type=str,  default="dkn_duconv",help="The path for voc and embedding file.")
     misc_arg.add_argument("--output_path", type=str, default="./output/test.result")
-    misc_arg.add_argument("--best_model_path", type=str, default="./models/best_model/")
+    misc_arg.add_argument("--best_model_path", type=str, default="dkn_duconv/models/best_model/")
     misc_arg.add_argument("--save_model_path", type=str, default="dkn_duconv/models")
+    misc_arg.add_argument("--continue_training", type=str, default="dkn_duconv/models/L1_H256_general.tar/Epo_01_iter_00600.tar")
 
     config = parser.parse_args()
 
@@ -81,7 +61,7 @@ def build_models(voc,config,checkpoint):
     hidden_size=config.hidden_size
     #embedding在encoder 和decoder外面因为他们共用embedding
     embedding_layer = nn.Embedding(voc_size, WORD_EMBEDDING_DIM)
-    embedding_layer.weight.data.copy_(torch.from_numpy(build_embedding(voc,config.voc_embedding_save_path)))
+    embedding_layer.weight.data.copy_(torch.from_numpy(build_embedding(voc,config.voc_and_embedding_save_path)))
     encoder = network.EncoderRNN(hidden_size, WORD_EMBEDDING_DIM, embedding_layer, config.n_layers, config.dropout)
     attn_model = config.attn
 
@@ -99,6 +79,10 @@ def build_models(voc,config,checkpoint):
     encoder = encoder.to(network.Global_device)
     decoder = decoder.to(network.Global_device)
     embedding_layer=embedding_layer.to(network.Global_device)
+    if config.run_type!="train":
+        encoder.eval()
+        decoder.eval()
+        embedding_layer.eval()
     return encoder,decoder
 
 def save_checkpoint(handeler):
@@ -117,11 +101,11 @@ def save_checkpoint(handeler):
             }, save_path)
 def train(config):
     print('-Loading dataset...')
-    DuConv_DataSet=My_dataset(config.run_type,config.data_dir,config.voc_embedding_save_path)
+    DuConv_DataSet=My_dataset(config.run_type,config.data_dir,config.voc_and_embedding_save_path)
     train_loader = DataLoader(dataset=DuConv_DataSet,\
          shuffle=True, batch_size=config.batch_size,drop_last=True,collate_fn=collate_fn)
     print('-Building models...')
-    checkpoint =torch.load(config.continue_training)  if config.continue_training != " " else None
+    checkpoint =torch.load(config.continue_training,map_location=network.Global_device)  if config.continue_training != " " else None
     encoder,decoder=build_models(DuConv_DataSet.voc,config,checkpoint)
     print('-Building optimizers ...')
     encoder_optimizer = optim.Adam(encoder.parameters(), lr=config.lr)
@@ -132,8 +116,6 @@ def train(config):
     print('-Initializing training process...')
     start_epoch=1
     start_iteration = 1
-    perplexity = []
-    print_loss = 0
     if checkpoint != None:
         start_iteration = checkpoint['iteration'] + 1
         start_epoch= checkpoint['epoch'] + 1
@@ -207,18 +189,10 @@ def trainIter(train_handler):
         start_iteration+=1
     return len(train_loader)
 
-def padding_sort_transform(input_sEQ):
-    """ input:[B x L]batch size 个变长句子TENSOR
-    返回[L*B ]个定长句子TENSOR
-    """
-    input_len=torch.Tensor([len(it) for it in input_sEQ])
-    input_sEQ=pad_sequence(input_sEQ,batch_first=True, padding_value=0)
-    _,idx_sort=torch.sort(input_len,dim=0,descending=True)
-    # _, idx_unsort = torch.sort(idx_sort, dim=0)
-    input_sEQ=input_sEQ.index_select(0,idx_sort)
-    lengths=list(input_len[idx_sort])
-    input_sEQ=input_sEQ.transpose(0, 1)
-    return input_sEQ,lengths
+
+
+
+
 
 
 if __name__ == "__main__":
@@ -226,8 +200,9 @@ if __name__ == "__main__":
     config = arg_config()
     # 模式： train / test
     run_type = config.run_type
-    
     if run_type == "train":
         train(config)
     elif run_type == "test":
-        test(config)
+        from test import test_model
+        test_model(config)
+    else: raise ValueError("run_type has to train or test.")
