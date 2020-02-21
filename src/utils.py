@@ -11,6 +11,7 @@ import os
 import json
 import random
 import numpy as np
+import torch 
 from torch import load,save
 from torch.nn.utils.rnn import pad_sequence
 #Vocabulary中的token标号

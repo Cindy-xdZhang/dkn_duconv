@@ -31,7 +31,7 @@ def arg_config():
     # Training / Testing CMD参数组
     train_arg = parser.add_argument_group("Training")
     train_arg.add_argument("--batch_size", type=int, default=2)
-    train_arg.add_argument('-r',"--run_type", type=str, default="test")
+    train_arg.add_argument('-r',"--run_type", type=str, default="train")
     train_arg.add_argument("--optimizer", type=str, default="Adam")
     train_arg.add_argument("--lr", type=float, default=0.0005)
     train_arg.add_argument("--end_epoch", type=int, default=13)
@@ -51,7 +51,7 @@ def arg_config():
     misc_arg.add_argument("--output_path", type=str, default="./output/test.result")
     misc_arg.add_argument("--best_model_path", type=str, default="dkn_duconv/models/best_model/")
     misc_arg.add_argument("--save_model_path", type=str, default="dkn_duconv/models")
-    misc_arg.add_argument("--continue_training", type=str, default="dkn_duconv/models/L1_H256_general.tar/Epo_01_iter_00600.tar")
+    misc_arg.add_argument("--continue_training", type=str, default=" ")
 
     config = parser.parse_args()
 
