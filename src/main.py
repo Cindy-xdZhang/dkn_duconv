@@ -27,11 +27,11 @@ def arg_config():
     net_arg.add_argument("--n_layers", type=int, default=1)
     net_arg.add_argument("--attn", type=str, default='general',
                          choices=['none', 'concat', 'dot', 'general'])
-    net_arg.add_argument("--dropout", type=float, default=0.3)
+    net_arg.add_argument("--dropout", type=float, default=0)
     # Training / Testing CMD参数组
     train_arg = parser.add_argument_group("Training")
-    train_arg.add_argument("--batch_size", type=int, default=2)
-    train_arg.add_argument('-r',"--run_type", type=str, default="train")
+    train_arg.add_argument("--batch_size", type=int, default=8)
+    train_arg.add_argument('-r',"--run_type", type=str, default="test")
     train_arg.add_argument("--optimizer", type=str, default="Adam")
     train_arg.add_argument("--lr", type=float, default=0.0005)
     train_arg.add_argument("--end_epoch", type=int, default=13)
@@ -43,15 +43,15 @@ def arg_config():
     misc_arg = parser.add_argument_group("Misc")
     misc_arg.add_argument('-u', "--use_gpu", type=str2bool, default=False)
     misc_arg.add_argument('-p',"--log_steps", type=int, default=1)
-    misc_arg.add_argument("--save_iteration", type=int, default=5,help='Every save_iteration iteration(s) save checkpoint model ')   
+    misc_arg.add_argument("--save_iteration", type=int, default=20,help='Every save_iteration iteration(s) save checkpoint model ')   
     #路径参数
     misc_arg.add_argument('-i',"--data_dir", type=str,  default="C:\\Users\\10718\\PycharmProjects\\dkn_duconv\\duconv_data",\
         help="The input text data path.")
     misc_arg.add_argument("--voc_and_embedding_save_path", type=str,  default="dkn_duconv",help="The path for voc and embedding file.")
-    misc_arg.add_argument("--output_path", type=str, default="./output/test.result")
+    misc_arg.add_argument("--output_path", type=str, default="dkn_duconv/output/")
     misc_arg.add_argument("--best_model_path", type=str, default="dkn_duconv/models/best_model/")
     misc_arg.add_argument("--save_model_path", type=str, default="dkn_duconv/models")
-    misc_arg.add_argument("--continue_training", type=str, default=" ")
+    misc_arg.add_argument("--continue_training", type=str, default="dkn_duconv/models/L1_H128_general/Epo_01_iter_00060.tar")
 
     config = parser.parse_args()
 
@@ -72,10 +72,10 @@ def build_models(voc,config,checkpoint):
         decoder.load_state_dict(checkpoint['de'])
     if config.use_gpu and USE_CUDA:
         network.Global_device = torch.device("cuda:0" )
-        print('**Train with GPU **')
+        print('**work with GPU **')
     else:
         network.Global_device = torch.device("cpu")
-        print('**Train with CPU **')
+        print('**work with CPU **')
     encoder = encoder.to(network.Global_device)
     decoder = decoder.to(network.Global_device)
     embedding_layer=embedding_layer.to(network.Global_device)
@@ -100,7 +100,7 @@ def save_checkpoint(handeler):
                 'de_opt': decoder_optimizer.state_dict(),
             }, save_path)
 def train(config):
-    print('-Loading dataset...')
+    print('-Loading dataset...batchsize: '+str(config.batch_size))
     DuConv_DataSet=My_dataset(config.run_type,config.data_dir,config.voc_and_embedding_save_path)
     train_loader = DataLoader(dataset=DuConv_DataSet,\
          shuffle=True, batch_size=config.batch_size,drop_last=True,collate_fn=collate_fn)
