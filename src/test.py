@@ -125,7 +125,6 @@ def eval(result_file, sample_file, eval_file):
         output_str += "DISTINCT1: %.3f%%\n" % distinct1
         output_str += "DISTINCT2: %.3f%%\n" % distinct2
         print(output_str)
-
 def test_model(config):
     print('-Test:loading dataset...')
     DuConv_test_DataSet=My_dataset("test",config.data_dir,config.voc_and_embedding_save_path)
