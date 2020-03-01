@@ -15,6 +15,7 @@ import network
 from data_loader import My_dataset
 from torch.utils.data import DataLoader
 from evaluate import *
+USE_CUDA = torch.cuda.is_available() 
 class Sentence:
     def __init__(self, decoder_hidden, last_idx=SOS_token, sentence_idxes=[], sentence_scores=[]):
         if(len(sentence_idxes) != len(sentence_scores)):
@@ -143,21 +144,53 @@ def test_model(config):
     voc=DuConv_test_DataSet.voc
     output_sentences=[]
     with torch.no_grad():
-        for batch_idx, data in enumerate(test_loader):
-            history,knowledge,responses=data["history"],data["knowledge"],data["response"]
-            history,len_history=padding_sort_transform(history)
-            knowledge,len_knowledge=padding_sort_transform(knowledge)
-            responses,len_responses=padding_sort_transform(responses)
-            if config.use_gpu and USE_CUDA: 
-                history,knowledge,responses = history.cuda() ,\
-                    knowledge.cuda() ,responses.cuda()
-            encoder_outputs, encoder_hidden = encoder(history,len_history,knowledge,len_knowledge)
-            decoder_hidden = encoder_hidden[:decoder.n_layers]
-            output_words_list=beam_decode(decoder,decoder_hidden,encoder_outputs,voc,config.beam_size,config.max_dec_len)
-            output_words, score=output_words_list[0]
-            output_sentence = ' '.join(output_words)
-            output_sentences.append(output_sentence)
+        if config.model_type=="gru":
+            for batch_idx, data in enumerate(test_loader):
+                history,knowledge,responses=data["history"],data["knowledge"],data["response"]
+                history,len_history=padding_sort_transform(history)
+                knowledge,len_knowledge=padding_sort_transform(knowledge)
+                responses,len_responses=padding_sort_transform(responses)
+                if config.use_gpu and USE_CUDA: 
+                    history,knowledge = history.cuda() ,\
+                        knowledge.cuda() 
+                encoder_outputs, encoder_hidden = encoder(history,len_history,knowledge,len_knowledge)
+                decoder_hidden = encoder_hidden[:decoder.n_layers]
+                output_words_list=beam_decode(decoder,decoder_hidden,encoder_outputs,voc,config.beam_size,config.max_dec_len)
+                output_words, score=output_words_list[0]
+                output_sentence = ' '.join(output_words)
+                output_sentences.append(output_sentence)
+        elif config.model_type=="trans":
+            for batch_idx, data in enumerate(test_loader):
+                history,knowledge,responses=data["history"],data["knowledge"],data["response"]
+                history = pad_sequence(history,batch_first=True, padding_value=0)
+                knowledge = pad_sequence(knowledge,batch_first=True, padding_value=0)
+                len_respons=[len(it) for it in responses]
+                len_respons.sort()
+                MAX_RESPONSE_LENGTH=len_respons[-1]-1
+                if config.use_gpu and USE_CUDA: 
+                    history,knowledge= history.cuda() ,knowledge.cuda()
+                #enc_outs =[batchsize,seq,embedding]
+                print("testing: ",batch_idx,"/",len(test_loader)," ...")
+                enc_output = encoder(history,knowledge)
+                #transformer decoder input 是之前生成的所有句子-》注意观察一下POSITION ENCODING 的移位情况
+                decoder_input = torch.LongTensor([SOS_token\
+                    for _ in range(batch_size)]).reshape(batch_size,1) #[batch_size,1]
+                for t in range(MAX_RESPONSE_LENGTH):
+                    decoder_input = decoder_input.to(network.Global_device)
+                    decoder_output, self_attentions, context_attentions = decoder( decoder_input, enc_output )
+                    #TODO:我用的选最后一个加squeeze. [b,l,dim]原文中又是如何变成[b,dim]的？
+                    decoder_output=decoder_output[:,-1,:].squeeze(1)
+                    #topi为概率最大词汇的下标shape=[batch_Size,1]
+                    _, topi = decoder_output.topk(1) # [batch_Size, 1]
+                    decoder_input= torch.LongTensor([decoder_input[i].numpy().tolist()+topi[i].numpy().tolist()    \
+                        for i in range(batch_size)]).reshape(batch_size,-1)
+                    if topi[0][0]==2:break
+                decoder_input=decoder_input.squeeze(0).numpy().tolist()
+                decoder_input_str=[voc.index2word[x] for x in decoder_input]
+                output_sentence = ' '.join(decoder_input_str)
+                output_sentences.append(output_sentence)
+
     topic_materialization(output_sentences,config.data_dir,config.output_path)
-    text_path=os.path.join(config.data_dir,"text."+"test"+".txt")
+    text_path=os.path.join(config.data_dir,"text.test.txt")
     eval_path=os.path.join(config.data_dir,"result_eval.txt")
     eval(config.output_path,text_path,eval_path)

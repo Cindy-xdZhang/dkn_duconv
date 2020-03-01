@@ -15,14 +15,17 @@ class ScheduledOptim():
         self.d_model = d_model
         self.n_warmup_steps = n_warmup_steps
         self.n_steps = 0
-
-
+    def load_state_dict(self,dict):
+        self._optimizer.load_state_dict(dict)
+        for param_group in self._optimizer.param_groups:
+            self.init_lr=param_group['lr']
+            break      
+    def state_dict(self):
+        return self._optimizer.state_dict()
     def step_and_update_lr(self):
         "Step with the inner optimizer"
         self._update_learning_rate()
         self._optimizer.step()
-
-
     def zero_grad(self):
         "Zero out the gradients with the inner optimizer"
         self._optimizer.zero_grad()

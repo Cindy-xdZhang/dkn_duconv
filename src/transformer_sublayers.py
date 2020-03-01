@@ -11,12 +11,30 @@ import numpy as np
 import torch.nn.functional as F
 def residual(sublayer_fn,x):
 	return sublayer_fn(x)+x
-def padding_mask(seq_k, seq_q):
-	# seq_k和seq_q的形状都是[B,L]
+def padding_mask(seq_q):
+	# seq_q的形状是[B,L]
+    # padding_mask 为shape [B, L, L],seq_q为0（pad)的地方x则对应的[Bi,:,x]为1
+    #sample:
+    #seq_q=tensor([[  1.,  44.,  23.,   2.,   0.,   0.,   0.], 
+    #[  1., 424., 323., 422.,   2.,   0.,   0.]]) 
+    # mask=tensor([[[0, 0, 0, 0, 1, 1, 1],
+    # [0, 0, 0, 0, 1, 1, 1],
+    #  [0, 0, 0, 0, 1, 1, 1],
+    #  [0, 0, 0, 0, 1, 1, 1],
+    #  [0, 0, 0, 0, 1, 1, 1],
+    #  [0, 0, 0, 0, 1, 1, 1],
+    #  [0, 0, 0, 0, 1, 1, 1]],
+    # [[0, 0, 0, 0, 0, 1, 1],
+    #  [0, 0, 0, 0, 0, 1, 1],
+    #  [0, 0, 0, 0, 0, 1, 1],
+    #  [0, 0, 0, 0, 0, 1, 1],
+    #  [0, 0, 0, 0, 0, 1, 1],
+    #  [0, 0, 0, 0, 0, 1, 1],
+    #  [0, 0, 0, 0, 0, 1, 1]]], dtype=torch.uint8)
     len_q = seq_q.size(1)
     # `PAD` is 0
-    pad_mask = seq_k.eq(0)
-    pad_mask = pad_mask.unsqueeze(1).expand(-1, len_q, -1)  # shape [B, L_q, L_k]
+    pad_mask = seq_q.eq(0)
+    pad_mask = pad_mask.unsqueeze(1).expand(-1, len_q, -1)  # shape [B, L, L]
     return pad_mask
 #    context_attn_mask = padding_mask(tgt_seq, src_seq)
 def sequence_mask(seq):
@@ -57,8 +75,8 @@ class PositionwiseFeedForward(nn.Module):
         '''
         super(PositionwiseFeedForward, self).__init__()
         self.w_1 = nn.Conv1d(d_in, d_hid, 1)
-        self.w_2 = nn.Conv1d(d_hid, d_hid, 1)
-        self.layer_normal = nn.LayerNorm(d_hid)
+        self.w_2 = nn.Conv1d(d_hid, d_in, 1)
+        self.layer_normal = nn.LayerNorm(d_in)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
@@ -67,6 +85,7 @@ class PositionwiseFeedForward(nn.Module):
         output = self.w_2(F.relu(self.w_1(output)))
         output = output.transpose(1, 2)
         output = self.dropout(output)
+        #output=[batch,x, d_in]
         output = self.layer_normal(output + residual)
         return output
 class MultiHeadAttention(nn.Module):
@@ -129,7 +148,7 @@ class MultiHeadAttention(nn.Module):
 
         # Transpose for attention dot product: b x n x lq x dv
         q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
-        
+        #enc+tgt 时:q=tgt[b,head,seqT,Dq];k=enc[b,head,seqE,Dq]
         if mask is not None:
             mask = mask.unsqueeze(1)   # For head axis broadcasting.
         #
@@ -165,8 +184,9 @@ class EncoderLayer(nn.Module):
         :param slf_attn_mask:
         :return:
         '''
-        #enc_output=[batchsize]
-        #enc_slf_attn=
+        #enc_input=[batchsize,seq,embeddingsize]
+        #enc_output=[batchsize,seq,embeddingsize]
+        #enc_slf_attn=[batchsize,head,seq,seq]
         enc_output, enc_slf_attn = self.slf_attn(enc_input, enc_input, enc_input, mask=slf_attn_mask)
         if non_pad_mask is not None:
             enc_output *= non_pad_mask
@@ -189,10 +209,10 @@ class DecoderLayer(nn.Module):
 
         # context attention
         # query is decoder's outputs, key and value are encoder's inputs
-        dec_output, context_attention = self.enc_attn(enc_outputs, enc_outputs, dec_output, context_attn_mask)
+        dec_output, context_attention = self.enc_attn(dec_output,enc_outputs, enc_outputs,context_attn_mask)
 
         # decoder's output, or context
         #hiddensize即model_dim;  feed_forward 输出dim为 ffn_dim
         dec_output = self.feed_forward(dec_output)
-
+        
         return dec_output, self_attention, context_attention

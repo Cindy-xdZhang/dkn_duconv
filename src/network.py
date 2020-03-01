@@ -198,18 +198,18 @@ class TransfomerEncoder(nn.Module):
             for _ in range(config.n_layers)
         ])
         #  enc_output = self.layer_norm(enc_output)
-        self.fc_out = nn.Sequential(
-            nn.Dropout(dropout),
-            nn.Linear(config.hidden_size, config.hidden_size),
-            nn.ReLU(inplace=True)
-        )
+        # self.fc_out = nn.Sequential(
+        #     nn.Dropout(dropout),
+        #     nn.Linear(embedding_size, config.hidden_size*2),
+        #     nn.ReLU(inplace=True)
+        # )
 
     def forward(self, char_his, kg):
         #history_embedded=[batchsize, seq=~106,embeddingsize=300]
         history_embedded= self.dropout(self.pos_embedding(self.char_embedding(char_his)))
         #kg_embed=[batchsize, seq=~103,embeddingsize=300]
         kg_embed=self.dropout(self.pos_embedding(self.char_embedding(kg)))
-        
+
         for layer in self.layer_stack_kg:
             history_embedded, _ = layer(history_embedded)
         #kg_embed(layer)=[b,s,embedding size] ->layer不变dim
@@ -217,28 +217,34 @@ class TransfomerEncoder(nn.Module):
             kg_embed, _ = layer(kg_embed)
         
         inputs_src=torch.cat((history_embedded,kg_embed),dim=1)
-        enc_outs = inputs_src.permute(0, 2, 1)
-        enc_outs = torch.sum(enc_outs, dim=-1)#enc_outs =[batchsize,hiddensize]
-        return self.fc_out(enc_outs)
+        # enc_outs = inputs_src.permute(0, 2, 1)
+        # enc_outs = torch.sum(enc_outs, dim=-1)#enc_outs =[batchsize,seq,embedding]->[batchsize,embedding]
+        # return self.fc_out(enc_outs)
+        return inputs_src
 class TransfomerDecoder(nn.Module):
-    def __init__(self,config,embedding,pos_embedding,voc_size,ffn_dim=2048):
+    def __init__(self,config,embedding,pos_embedding,voc_size,ffn_dim=512):
         super(TransfomerDecoder, self).__init__()
-        self.decoder_layers = nn.ModuleList([DecoderLayer(config.hidden_size, config.k_dims, config.v_dims, \
+        self.decoder_layers = nn.ModuleList([DecoderLayer(300, config.k_dims, config.v_dims, \
             config.n_heads, ffn_dim, config.dropout) for _ in range(config.n_layers)])
         self.seq_embedding = embedding
         self.pos_embedding = pos_embedding
-
-        self.final_transformer_linear = nn.Linear(config.hidden_size, voc_size, bias=False)
+        # self.conb=nn.Sequential(
+        #     nn.Linear(config.hidden_size*2, 300, bias=False),
+        #     nn.ReLU(inplace=True)
+        # )
+        self.final_transformer_linear = nn.Linear(300, voc_size, bias=False)
         self.final_transformer_softmax = nn.Softmax(dim=2)
 
-    def forward(self, decoder_inputs, inputs_len, enc_output, context_attn_mask=None):
-        output = self.seq_embedding(decoder_inputs)
-        output += self.pos_embedding(inputs_len)
-
-        self_attention_padding_mask = padding_mask(decoder_inputs, decoder_inputs)
+    def forward(self, decoder_inputs, enc_output, context_attn_mask=None):
+        #enc_output[B L E]
+        #output:[B L E]
+        output=self.pos_embedding(self.seq_embedding(decoder_inputs))
+        # padding_mask requires that seq_k和seq_q的形状都是[B,L]
+        #self_attention_padding_mask=[B,L,L]
+        self_attention_padding_mask = padding_mask(decoder_inputs)
         seq_mask = sequence_mask(decoder_inputs)
+        #self_attn_mask=[B,L,L]
         self_attn_mask = torch.gt((self_attention_padding_mask + seq_mask), 0)
-
         self_attentions = []
         context_attentions = []
         for decoder in self.decoder_layers:
@@ -246,6 +252,7 @@ class TransfomerDecoder(nn.Module):
             output, enc_output, self_attn_mask, context_attn_mask)
             self_attentions.append(self_attn)
             context_attentions.append(context_attn)
+        
         #transformer forward:
         #context_attn_mask = padding_mask(tgt_seq, src_seq)
         #output, enc_self_attn = self.encoder(src_seq, src_len)
@@ -253,6 +260,8 @@ class TransfomerDecoder(nn.Module):
         #output = self.linear(output)
         #output = self.softmax(output)
         # return output, enc_self_attn, dec_self_attn, ctx_attn
+     
         output = self.final_transformer_linear(output)
         output = self.final_transformer_softmax(output)
+
         return output, self_attentions, context_attentions

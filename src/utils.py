@@ -300,7 +300,7 @@ def str2bool(v):
     else:
         raise argparse.ArgumentTypeError('Unsupported value encountered.')
 
-def padding_transform(input_sEQ):
+def padding_sort_transform(input_sEQ):
     """ input:[B x L]batch size 个变长句子TENSOR
     返回[L*B ]个定长句子TENSOR
     """
@@ -323,25 +323,3 @@ def collate_fn(batch):
         'response': response,
     }
 
-def padding_seq(input_sEQ):
-    """
-    x=[[1,2],[1,223,34,2],[1,23,34,2]]
-    x=[torch.LongTensor(it) for it in x]
-    x,y=position_seqs(x)
-    print(x,y)
-    tensor([[  1,   2,   0,   0],
-        [  1, 223,  34,   2],
-        [  1,  23,  34,   2]]) 
-    tensor([[1, 2, 0, 0],
-        [1, 2, 3, 4],
-        [1, 2, 3, 4]])
-    """
-    input_len=[len(it) for it in input_sEQ]
-    input_sEQ=pad_sequence(input_sEQ,batch_first=True, padding_value=0)
-    # positons=[]
-    # for item in input_len :
-    #     positon=[ x for x in range(1,item+1) ]
-    #     positons.append(torch.LongTensor(positon))
-    # positons=pad_sequence(positons,batch_first=True, padding_value=0)
-    return input_sEQ
->>>>>>> 905728c... transformer 初步网络搭建
