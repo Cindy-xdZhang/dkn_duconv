@@ -244,7 +244,7 @@ class TransfomerDecoder(nn.Module):
         self_attention_padding_mask = padding_mask(decoder_inputs)
         seq_mask = sequence_mask(decoder_inputs)
         #self_attn_mask=[B,L,L]
-        self_attn_mask = torch.gt((self_attention_padding_mask + seq_mask), 0)
+        self_attn_mask = (torch.gt((self_attention_padding_mask.float() + seq_mask.float()), 0)).float()
         self_attentions = []
         context_attentions = []
         for decoder in self.decoder_layers:

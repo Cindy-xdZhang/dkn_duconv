@@ -323,3 +323,7 @@ def collate_fn(batch):
         'response': response,
     }
 
+def get_infinite_batches(self, data_loader):
+        while True:
+            for i, (images, _) in enumerate(data_loader):
+                yield images    

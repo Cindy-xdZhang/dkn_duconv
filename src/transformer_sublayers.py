@@ -105,8 +105,9 @@ class MultiHeadAttention(nn.Module):
         super(MultiHeadAttention, self).__init__()
 
         self.n_head = n_head
-        self.d_k = d_k
-        self.d_v = d_v
+        self.d_k = d_k//n_head
+        self.d_v = d_v//n_head
+
         # 产生 查询向量q，键向量k， 值向量v
         self.w_qs = nn.Linear(d_model, n_head * d_k)
         self.w_ks = nn.Linear(d_model, n_head * d_k)

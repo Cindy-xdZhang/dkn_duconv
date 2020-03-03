@@ -18,7 +18,8 @@ from utils import *
 import network 
 from optimiser import ScheduledOptim
 USE_CUDA = torch.cuda.is_available() 
-
+torch.backends.cudnn.enabled = True
+torch.backends.cudnn.benchmark = True
 def arg_config():
     def print_config_information(config):
         print('======================model===============================')
@@ -44,10 +45,10 @@ def arg_config():
     parser = argparse.ArgumentParser()
     # Network CMD参数组
     net_arg = parser.add_argument_group("Network")
-    net_arg.add_argument("--model_type", type=str, default='gru',
+    net_arg.add_argument("--model_type", type=str, default='trans',
                          choices=['trans', 'gru'])
-    net_arg.add_argument("--hidden_size", type=int, default=10)
-    net_arg.add_argument("--n_layers", type=int, default=1)
+    net_arg.add_argument("--hidden_size", type=int, default=512)
+    net_arg.add_argument("--n_layers", type=int, default=6)
     net_arg.add_argument("--attn", type=str, default='general',
                          choices=['none', 'concat', 'dot', 'general'])
     net_arg.add_argument("--dropout", type=float, default=0)
@@ -58,7 +59,7 @@ def arg_config():
     # Training / Testing CMD参数组
     train_arg = parser.add_argument_group("Training")
     train_arg.add_argument("--n_warmup_steps", type=int, default=4000)
-    train_arg.add_argument("--batch_size", type=int, default=1)
+    train_arg.add_argument("--batch_size", type=int, default=10)
     train_arg.add_argument('-r',"--run_type", type=str, default="train",
      choices=['train', 'test'])
     train_arg.add_argument("--optimizer", type=str, default="Adam")
@@ -71,6 +72,7 @@ def arg_config():
     # MISC ：logs,dirs and gpu config
     misc_arg = parser.add_argument_group("Misc")
     misc_arg.add_argument('-u', "--use_gpu", type=str2bool, default=True)
+    misc_arg.add_argument("--multi_gpu", type=str2bool, default=True)
     misc_arg.add_argument('-p',"--log_steps", type=int, default=1)
     misc_arg.add_argument("--save_iteration", type=int, default=20,help='Every save_iteration iteration(s) save checkpoint model ')   
     #路径参数
@@ -80,7 +82,7 @@ def arg_config():
     misc_arg.add_argument("--output_path", type=str, default="dkn_duconv/output/")
     misc_arg.add_argument("--best_model_path", type=str, default="dkn_duconv/models/best_model/")
     misc_arg.add_argument("--save_model_path", type=str, default="dkn_duconv/models")
-    misc_arg.add_argument("--continue_training", type=str, default="C:\\Users\\10718\\PycharmProjects\\dkn_duconv\\models\\gru\\L1_H10_general\\Epo_01_iter_00020.tar")
+    misc_arg.add_argument("--continue_training", type=str, default=" ")
     misc_arg.add_argument("--logfile_path", type=str, default="./log.txt")
     config = parser.parse_args()
     print_config_information(config)
@@ -103,6 +105,11 @@ def build_models(voc,config,checkpoint):
         encoder =network.TransfomerEncoder(config,voc_embedding_layer,pos_embedding_layer)
         decoder =network.TransfomerDecoder(config,voc_embedding_layer,pos_embedding_layer,voc_size)
     else: raise Exception("model type error!")
+    #model 大小计算
+    encoder_para = sum([np.prod(list(p.size())) for p in encoder.parameters()])
+    decoder_para = sum([np.prod(list(p.size())) for p in decoder.parameters()])
+    print('Build encoder with params: {:4f}M'.format( encoder_para * 4 / 1000 / 1000))
+    print('Build decoder with params: {:4f}M'.format( decoder_para * 4 / 1000 / 1000))
 
     if checkpoint != None:
         if checkpoint['type'] !=config.model_type:
@@ -110,15 +117,22 @@ def build_models(voc,config,checkpoint):
         print('-loading models from checkpoint .....')
         encoder.load_state_dict(checkpoint['en'])
         decoder.load_state_dict(checkpoint['de'])
-    if config.use_gpu and USE_CUDA:
+    if config.use_gpu and USE_CUDA and  config.multi_gpu==True:
+        print('**work with multi-GPU **')
+        # 将网络同步到多个GPU中
         network.Global_device = torch.device("cuda:0" )
-        print('**work with GPU **')
+        encoder = torch.nn.DataParalle(encoder.cuda(), device_ids=[0, 1])
+        decoder = torch.nn.DataParalle(decoder.cuda(), device_ids=[0, 1])
+    elif  config.use_gpu and USE_CUDA and  config.multi_gpu==False:
+        print('**work with solo-GPU **')
+        network.Global_device = torch.device("cuda:0" )
+        encoder = encoder.to(network.Global_device)
+        decoder = decoder.to(network.Global_device)
     else:
         network.Global_device = torch.device("cpu")
         print('**work with CPU **')
-    encoder = encoder.to(network.Global_device)
-    decoder = decoder.to(network.Global_device)
-
+        encoder = encoder.to(network.Global_device)
+        decoder = decoder.to(network.Global_device)
     if config.run_type!="train":
         encoder.eval()
         decoder.eval()
@@ -190,10 +204,18 @@ def train_trans(config):
     
     for epoch_id in range(start_epoch, end_epoch):
         train_handler=(epoch_id,start_iteration,train_loader,encoder,decoder,encoder_optimizer,decoder_optimizer,config)
-        start_iteration+= trainIter_trans(train_handler)        
+        iterations,epoch_loss= trainIter_trans(train_handler)   
+        start_iteration+=iterations
+        with open(config.logfile_path,'a') as f:
+                template=' Train Epoch: {} \t Overall Loss: {:.6f}\t time: {}\n'
+                str=template.format(epoch, epoch_loss,time.asctime(time.localtime(time.time())))
+                f.write(str)
+        
+
 def trainIter_trans(train_handler):
     epoch,start_iteration,train_loader,encoder,decoder,encoder_optimizer,decoder_optimizer,config=train_handler
     stage_total_loss=0
+    epoch_loss_avg=0
     batch_size=config.batch_size
     for batch_idx, data in enumerate(train_loader):
         history,knowledge,responses=data["history"],data["knowledge"],data["response"]
@@ -222,8 +244,10 @@ def trainIter_trans(train_handler):
             decoder_output=decoder_output[:,-1,:].squeeze(1)
             #topi为概率最大词汇的下标shape=[batch_Size,1]
             _, topi = decoder_output.topk(1) # [batch_Size, 1]
-            decoder_input= torch.LongTensor([decoder_input[i].numpy().tolist()+topi[i].numpy().tolist()    \
-                for i in range(batch_size)]).reshape(batch_size,-1)
+            #TODO:
+            # decoder_input= torch.LongTensor([decoder_input[i].cpu().numpy().tolist()+topi[i].cpu().numpy().tolist()    \
+                # for i in range(batch_size)]).reshape(batch_size,-1)
+            decoder_input=torch.cat((decoder_input,topi),1)
             decoder_input = decoder_input.to(network.Global_device)  
             # decoder_output=[batch_Size, voc]  responses[seq,batchsize]
             
@@ -235,6 +259,7 @@ def trainIter_trans(train_handler):
         encoder_optimizer.step_and_update_lr()    
         decoder_optimizer.step_and_update_lr()  
         stage_total_loss+=loss.cpu().item() 
+        epoch_loss_avg+=loss.cpu().item() 
         #相当于更新权重值
         if batch_idx % config.log_steps == 0:
             print_loss_avg = (stage_total_loss / config.log_steps)
@@ -251,7 +276,7 @@ def trainIter_trans(train_handler):
             save_handler=(epoch,start_iteration,train_loader,encoder,decoder,encoder_optimizer,decoder_optimizer,config)
             save_checkpoint(save_handler)
         start_iteration+=1
-    return len(train_loader)
+    return len(train_loader),epoch_loss_avg/len(train_loader)
 def train_gru(config):
     print('-Loading dataset ...')
     DuConv_DataSet=My_dataset(config.run_type,config.data_dir,config.voc_and_embedding_save_path)
@@ -277,10 +302,16 @@ def train_gru(config):
     
     for epoch_id in range(start_epoch, end_epoch):
         train_handler=(epoch_id,start_iteration,train_loader,encoder,decoder,encoder_optimizer,decoder_optimizer,config)
-        start_iteration+= trainIter_gru(train_handler)   
+        iterations,epoch_loss= trainIter_trans(train_handler)   
+        start_iteration+=iterations
+        with open(config.logfile_path,'a') as f:
+                template=' Train Epoch: {} \t Overall Loss: {:.6f}\t time: {}\n'
+                str=template.format(epoch, epoch_loss,time.asctime(time.localtime(time.time())))
+                f.write(str)
 def trainIter_gru(train_handler):
     epoch,start_iteration,train_loader,encoder,decoder,encoder_optimizer,decoder_optimizer,config=train_handler
     stage_total_loss=0
+    epoch_loss_avg=0
     batch_size=config.batch_size
     for batch_idx, data in enumerate(train_loader):
         history,knowledge,responses=data["history"],data["knowledge"],data["response"]
@@ -324,6 +355,7 @@ def trainIter_gru(train_handler):
         encoder_optimizer.step()    
         decoder_optimizer.step()  
         stage_total_loss+=loss.cpu().item() 
+        epoch_loss_avg+=loss.cpu().item() 
         #相当于更新权重值
         if batch_idx % config.log_steps == 0:
             print_loss_avg = (stage_total_loss / config.log_steps)
@@ -340,7 +372,7 @@ def trainIter_gru(train_handler):
             save_handler=(epoch,start_iteration,train_loader,encoder,decoder,encoder_optimizer,decoder_optimizer,config)
             save_checkpoint(save_handler)
         start_iteration+=1
-    return len(train_loader)
+    return len(train_loader),epoch_loss_avg/len(train_loader)
 
 if __name__ == "__main__":
     #配置解析CMD 参数
