@@ -20,6 +20,16 @@ from optimiser import ScheduledOptim
 USE_CUDA = torch.cuda.is_available() 
 torch.backends.cudnn.enabled = True
 torch.backends.cudnn.benchmark = True
+#shareW True:
+# Build encoder with params: 96.199600M
+# Build decoder with params: 156.718912M        
+# Build encoder layer_stack_kg params: 7.653200M
+# Build decoder_ff_para: 7.899712M
+#shareW False:
+#Build encoder with params: 98.520720M
+# Build decoder with params: 159.040032M
+# Build encoder layer_stack_kg params: 8.813760M
+# Build decoder_ff_para: 10.220832M
 def arg_config():
     def print_config_information(config):
         print('======================model===============================')
@@ -55,12 +65,14 @@ def arg_config():
     net_arg.add_argument("--k_dims", type=int, default=64)
     net_arg.add_argument("--v_dims", type=int, default=64)
     net_arg.add_argument("--n_heads", type=int, default=8)
+    net_arg.add_argument("--shareW", type=str2bool, default=False)
+    net_arg.add_argument('-sk', "--select_kg", type=str2bool, default=True)
 
     # Training / Testing CMD参数组
     train_arg = parser.add_argument_group("Training")
     train_arg.add_argument("--n_warmup_steps", type=int, default=4000)
-    train_arg.add_argument("--batch_size", type=int, default=10)
-    train_arg.add_argument('-r',"--run_type", type=str, default="train",
+    train_arg.add_argument('-bs',"--batch_size", type=int, default=3)
+    train_arg.add_argument('-r',"--run_type", type=str, default="test",
      choices=['train', 'test'])
     train_arg.add_argument("--optimizer", type=str, default="Adam")
     train_arg.add_argument("--lr", type=float, default=0.002)#for transformer init lr will expand 1000times.so recommendation is 0.002
@@ -74,7 +86,7 @@ def arg_config():
     misc_arg.add_argument('-u', "--use_gpu", type=str2bool, default=True)
     misc_arg.add_argument("--multi_gpu", type=str2bool, default=True)
     misc_arg.add_argument('-p',"--log_steps", type=int, default=1)
-    misc_arg.add_argument("--save_iteration", type=int, default=20,help='Every save_iteration iteration(s) save checkpoint model ')   
+    misc_arg.add_argument('-s',"--save_iteration", type=int, default=20,help='Every save_iteration iteration(s) save checkpoint model ')   
     #路径参数
     misc_arg.add_argument('-i',"--data_dir", type=str,  default="C:\\Users\\10718\\PycharmProjects\\dkn_duconv\\duconv_data",\
         help="The input text data path.")
@@ -82,10 +94,14 @@ def arg_config():
     misc_arg.add_argument("--output_path", type=str, default="dkn_duconv/output/")
     misc_arg.add_argument("--best_model_path", type=str, default="dkn_duconv/models/best_model/")
     misc_arg.add_argument("--save_model_path", type=str, default="dkn_duconv/models")
-    misc_arg.add_argument("--continue_training", type=str, default=" ")
+    misc_arg.add_argument("--continue_training", type=str, default="dkn_duconv\\models\\trans\\L6_H512_\\Epo_01_iter_00020.tar")
     misc_arg.add_argument("--logfile_path", type=str, default="./log.txt")
     config = parser.parse_args()
     print_config_information(config)
+    if os.path.exists(config.logfile_path): 
+        os.remove(config.logfile_path) 
+    if os.path.exists("./nohup.out"):     
+        os.remove("./nohup.out")
     return config
 def build_models(voc,config,checkpoint):
     voc_size=voc.n_words
@@ -94,6 +110,7 @@ def build_models(voc,config,checkpoint):
         #embedding在encoder 和decoder外面因为他们共用embedding
         embedding_layer = nn.Embedding(voc_size, WORD_EMBEDDING_DIM)
         embedding_layer.weight.data.copy_(torch.from_numpy(build_embedding(voc,config.voc_and_embedding_save_path)))
+        
         encoder = network.EncoderRNN(hidden_size, WORD_EMBEDDING_DIM, embedding_layer, config.n_layers, config.dropout)
         attn_model = config.attn
         decoder = network.LuongAttnDecoderRNN(attn_model, embedding_layer,WORD_EMBEDDING_DIM, hidden_size, voc_size,\
@@ -108,9 +125,10 @@ def build_models(voc,config,checkpoint):
     #model 大小计算
     encoder_para = sum([np.prod(list(p.size())) for p in encoder.parameters()])
     decoder_para = sum([np.prod(list(p.size())) for p in decoder.parameters()])
+    encoder_l_para= sum([np.prod(list(p.size())) for p in encoder.layer_stack_kg.parameters()])
+    decoder_ff_para= sum([np.prod(list(p.size())) for p in decoder.decoder_layers.parameters()])
     print('Build encoder with params: {:4f}M'.format( encoder_para * 4 / 1000 / 1000))
     print('Build decoder with params: {:4f}M'.format( decoder_para * 4 / 1000 / 1000))
-
     if checkpoint != None:
         if checkpoint['type'] !=config.model_type:
             raise Exception("checkpoint and train model type doesn't match!")
@@ -137,7 +155,6 @@ def build_models(voc,config,checkpoint):
         encoder.eval()
         decoder.eval()
     return encoder,decoder
-
 def save_checkpoint(handeler):
     epoch,start_iteration,train_loader,encoder,decoder,encoder_optimizer,decoder_optimizer,config=handeler
     if config.model_type =="gru":
@@ -167,10 +184,9 @@ def save_checkpoint(handeler):
                 'de': decoder.state_dict(),
                 'en_opt': encoder_optimizer.state_dict(),
                 'de_opt': decoder_optimizer.state_dict(),
-            }, save_path)
-    
+            }, save_path)    
 def train_trans(config):
-    if config.batch_size < 2048 and config.n_warmup_steps <= 4000 :
+    if config.batch_size < 2048 and config.n_warmup_steps < 4000 :
         print('[Warning] The warmup steps may be not enough.\n'\
               '(batch_size, warmup) = (2048, 4000) is the official setting.\n'\
               'Using smaller batch w/o longer warmup may cause '\
@@ -210,8 +226,6 @@ def train_trans(config):
                 template=' Train Epoch: {} \t Overall Loss: {:.6f}\t time: {}\n'
                 str=template.format(epoch, epoch_loss,time.asctime(time.localtime(time.time())))
                 f.write(str)
-        
-
 def trainIter_trans(train_handler):
     epoch,start_iteration,train_loader,encoder,decoder,encoder_optimizer,decoder_optimizer,config=train_handler
     stage_total_loss=0

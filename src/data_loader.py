@@ -16,7 +16,6 @@ class Dataset(object):
     ``__len__``, that provides the size of the dataset, and ``__getitem__``,
     supporting integer indexing in range from 0 to len(self) exclusive.
     """
-
     def __getitem__(self, index):
         raise NotImplementedError
 

@@ -93,7 +93,7 @@ class MultiHeadAttention(nn.Module):
         “多头”注意力模型
     '''
 
-    def __init__(self, n_head, d_model, d_k, d_v, dropout):
+    def __init__(self, n_head, d_model, d_k, d_v, dropout,mh_w_qs=None,mh_w_vs=None,mh_w_fc=None):
         '''
 
         :param n_head: “头”数
@@ -103,26 +103,30 @@ class MultiHeadAttention(nn.Module):
         :param dropout:
         '''
         super(MultiHeadAttention, self).__init__()
-
+        d_k=d_k//n_head
+        d_v=d_v//n_head
         self.n_head = n_head
-        self.d_k = d_k//n_head
-        self.d_v = d_v//n_head
+        self.d_k = d_k
+        self.d_v = d_v
 
         # 产生 查询向量q，键向量k， 值向量v
-        self.w_qs = nn.Linear(d_model, n_head * d_k)
-        self.w_ks = nn.Linear(d_model, n_head * d_k)
-        self.w_vs = nn.Linear(d_model, n_head * d_v)
-
-        nn.init.normal_(self.w_qs.weight, mean=0, std=np.sqrt(2.0 / (d_model + d_k)))
-        nn.init.normal_(self.w_ks.weight, mean=0, std=np.sqrt(2.0 / (d_model + d_k)))
-        nn.init.normal_(self.w_vs.weight, mean=0, std=np.sqrt(2.0 / (d_model + d_v)))
+        if mh_w_qs!=None:self.w_qs=mh_w_qs
+        else:
+            self.w_qs = nn.Linear(d_model, n_head * d_k)
+            nn.init.normal_(self.w_qs.weight, mean=0, std=np.sqrt(2.0 / (d_model + d_k)))
+        # self.w_ks = nn.Linear(d_model, n_head * d_k)
+        if mh_w_vs!=None:self.w_vs=mh_w_vs
+        else:
+            self.w_vs = nn.Linear(d_model, n_head * d_v)
+            nn.init.normal_(self.w_vs.weight, mean=0, std=np.sqrt(2.0 / (d_model + d_v)))
 
         self.attention = ScaledDotProductAttention(temperature=np.power(d_k, 0.5))
 
         self.layer_normal = nn.LayerNorm(d_model)
-
-        self.fc = nn.Linear(n_head * d_v, d_model)
-        nn.init.kaiming_normal_(self.fc.weight)
+        if mh_w_fc!=None:self.fc=mh_w_fc
+        else:
+            self.fc = nn.Linear(n_head * d_v, d_model)
+            nn.init.kaiming_normal_(self.fc.weight)
 
         self.dropout = nn.Dropout(dropout)
 
@@ -144,7 +148,7 @@ class MultiHeadAttention(nn.Module):
         residual = q
         #batchsize,seq_lens,nhead,d_k
         q = self.w_qs(q).view(sz_b, len_q, n_head, d_k)
-        k = self.w_ks(k).view(sz_b, len_k, n_head, d_k)
+        k = self.w_qs(k).view(sz_b, len_k, n_head, d_k)
         v = self.w_vs(v).view(sz_b, len_v, n_head, d_v)
 
         # Transpose for attention dot product: b x n x lq x dv
@@ -163,7 +167,7 @@ class MultiHeadAttention(nn.Module):
         return output, attn
 class EncoderLayer(nn.Module):
     '''编码层'''
-    def __init__(self, embedding_size, hidden_size, n_head, d_k, d_v, dropout):
+    def __init__(self, embedding_size, hidden_size, n_head, d_k, d_v, dropout,mh_w_qs=None,mh_w_vs=None,mh_w_fc=None):
         '''
 
         :param embedding_size: 模型输入维度==voc embedding_size
@@ -174,7 +178,7 @@ class EncoderLayer(nn.Module):
         :param dropout:
         '''
         super(EncoderLayer, self).__init__()
-        self.slf_attn = MultiHeadAttention(n_head, embedding_size, d_k, d_v, dropout=dropout)
+        self.slf_attn = MultiHeadAttention(n_head, embedding_size, d_k, d_v, dropout=dropout,mh_w_qs=mh_w_qs,mh_w_vs=mh_w_vs,mh_w_fc=mh_w_fc)
         self.pos_ffn = PositionwiseFeedForward(embedding_size, hidden_size, dropout=dropout)
 
     def forward(self, enc_input, non_pad_mask=None, slf_attn_mask=None):
@@ -198,10 +202,10 @@ class EncoderLayer(nn.Module):
         return enc_output, enc_slf_attn
 class DecoderLayer(nn.Module):
 
-    def __init__(self, model_dim, d_k, d_v, n_head=8, ffn_dim=2048, dropout=0.0):
+    def __init__(self, model_dim, d_k, d_v, n_head=8, ffn_dim=2048, dropout=0.0,mh_w_qs1=None,mh_w_vs1=None,mh_w_fc1=None,mh_w_qs2=None,mh_w_vs2=None,mh_w_fc2=None):
         super(DecoderLayer, self).__init__()
-        self.slf_attn = MultiHeadAttention(n_head, model_dim, d_k, d_v, dropout=dropout)
-        self.enc_attn = MultiHeadAttention(n_head, model_dim, d_k, d_v, dropout=dropout)
+        self.slf_attn = MultiHeadAttention(n_head, model_dim, d_k, d_v, dropout=dropout,mh_w_qs=mh_w_qs1,mh_w_vs=mh_w_vs1,mh_w_fc=mh_w_fc1)
+        self.enc_attn = MultiHeadAttention(n_head, model_dim, d_k, d_v, dropout=dropout,mh_w_qs=mh_w_qs2,mh_w_vs=mh_w_vs2,mh_w_fc=mh_w_fc2)
         self.feed_forward = PositionwiseFeedForward(model_dim, ffn_dim, dropout=dropout)
 
     def forward(self,dec_inputs,enc_outputs,self_attn_mask=None,context_attn_mask=None):

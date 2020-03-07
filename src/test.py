@@ -173,17 +173,17 @@ def test_model(config):
                 print("testing: ",batch_idx,"/",len(test_loader)," ...")
                 enc_output = encoder(history,knowledge)
                 #transformer decoder input 是之前生成的所有句子-》注意观察一下POSITION ENCODING 的移位情况
-                decoder_input = torch.LongTensor([SOS_token\
-                    for _ in range(batch_size)]).reshape(batch_size,1) #[batch_size,1]
+                decoder_input = torch.LongTensor([SOS_token]).reshape(1,-1) #[batch_size,1]
+                decoder_input = decoder_input.to(network.Global_device)
                 for t in range(MAX_RESPONSE_LENGTH):
                     decoder_input = decoder_input.to(network.Global_device)
                     decoder_output, self_attentions, context_attentions = decoder( decoder_input, enc_output )
                     #TODO:我用的选最后一个加squeeze. [b,l,dim]原文中又是如何变成[b,dim]的？
                     decoder_output=decoder_output[:,-1,:].squeeze(1)
-                    #topi为概率最大词汇的下标shape=[batch_Size,1]
-                    _, topi = decoder_output.topk(1) # [batch_Size, 1]
-                    decoder_input= torch.LongTensor([decoder_input[i].numpy().tolist()+topi[i].numpy().tolist()    \
-                        for i in range(batch_size)]).reshape(batch_size,-1)
+                    #topi为概率最大词汇的下标shape=[batch_Size=1,1]
+                    _, topi = decoder_output.topk(1) # [batch_Size=1, 1]
+                    decoder_input=torch.cat((decoder_input,topi),1)
+                    #BATCHSIZE=1
                     if topi[0][0]==2:break
                 decoder_input=decoder_input.squeeze(0).numpy().tolist()
                 decoder_input_str=[voc.index2word[x] for x in decoder_input]

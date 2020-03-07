@@ -322,6 +322,7 @@ def collate_fn(batch):
         'knowledge': knowledge,
         'response': response,
     }
+    
 
 def get_infinite_batches(self, data_loader):
         while True:
