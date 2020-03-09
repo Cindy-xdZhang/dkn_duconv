@@ -89,7 +89,7 @@ def topic_materialization(inputs_sentenses,data_dir,output_file_dir):
     """
     topic_materialization
     """
-    topic_file=os.path.join(data_dir,"topic.test_reduce.txt")
+    topic_file=os.path.join(data_dir,"topic.test.txt")
     # inputs = [line.strip() for line in open(input_file, 'r')]
     inputs = inputs_sentenses
     topics = [line.strip() for line in open(topic_file, 'r',encoding="utf-8")]
