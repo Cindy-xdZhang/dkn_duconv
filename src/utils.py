@@ -72,7 +72,7 @@ class Vocabulary:
             response_length=len(item["response"].split(" "))
             item["response"]=self.encoding_sentence(item["response"],max_length=response_length+1)
             #kg
-            kg=' EOS '.join([' '.join(spo) for spo in item["knowledge"]])
+            kg=' PAD '.join([' '.join(spo) for spo in item["knowledge"]])
             length=len(kg.split())
             item["knowledge"]=self.encoding_sentence(kg,max_length=length)
             

@@ -9,12 +9,14 @@
 import torch
 import os
 import json
+import time
 from utils import *
-from main import build_models
 import network 
+from torch.nn import functional as F
 from data_loader import My_dataset
 from torch.utils.data import DataLoader
 from evaluate import *
+from main import build_models 
 USE_CUDA = torch.cuda.is_available() 
 class Sentence:
     def __init__(self, decoder_hidden, last_idx=SOS_token, sentence_idxes=[], sentence_scores=[]):
@@ -87,7 +89,7 @@ def topic_materialization(inputs_sentenses,data_dir,output_file_dir):
     """
     topic_materialization
     """
-    topic_file=os.path.join(data_dir,"topic.test.txt")
+    topic_file=os.path.join(data_dir,"topic.test_reduce.txt")
     # inputs = [line.strip() for line in open(input_file, 'r')]
     inputs = inputs_sentenses
     topics = [line.strip() for line in open(topic_file, 'r',encoding="utf-8")]
@@ -131,7 +133,7 @@ def test_model(config):
     DuConv_test_DataSet=My_dataset("test",config.data_dir,config.voc_and_embedding_save_path)
     #test时batchsize=1
     test_loader = DataLoader(dataset=DuConv_test_DataSet,\
-            shuffle=True, batch_size=1,drop_last=True,collate_fn=collate_fn)
+            shuffle=False, batch_size=1,drop_last=False,collate_fn=collate_fn)
     print('-Test:building models...')
     if config.continue_training != " " :
         checkpoint =torch.load(config.continue_training,map_location=network.Global_device) 
@@ -146,14 +148,16 @@ def test_model(config):
     with torch.no_grad():
         if config.model_type=="gru":
             for batch_idx, data in enumerate(test_loader):
+                print("testing: ",batch_idx,"/",len(test_loader)," ...")
                 history,knowledge,responses=data["history"],data["knowledge"],data["response"]
-                history,len_history=padding_sort_transform(history)
-                knowledge,len_knowledge=padding_sort_transform(knowledge)
-                responses,len_responses=padding_sort_transform(responses)
+                history,len_history,idx_unsort1 = padding_sort_transform(history)
+                knowledge,len_knowledge,idx_unsort2 = padding_sort_transform(knowledge)
+                responses,len_response,idx_unsort3 = padding_sort_transform(responses)
                 if config.use_gpu and USE_CUDA: 
-                    history,knowledge = history.cuda() ,\
-                        knowledge.cuda() 
-                encoder_outputs, encoder_hidden = encoder(history,len_history,knowledge,len_knowledge)
+                    history,knowledge,responses,idx_unsort1,idx_unsort2,idx_unsort3 = history.cuda() ,\
+                knowledge.cuda() ,responses.cuda(),idx_unsort1.cuda(),idx_unsort2.cuda(),idx_unsort3.cuda()
+                unsort_idxs=(idx_unsort1,idx_unsort2)
+                encoder_outputs, encoder_hidden = encoder(history,len_history,knowledge,len_knowledge,unsort_idxs)
                 decoder_hidden = encoder_hidden[:decoder.n_layers]
                 output_words_list=beam_decode(decoder,decoder_hidden,encoder_outputs,voc,config.beam_size,config.max_dec_len)
                 output_words, score=output_words_list[0]
@@ -161,6 +165,7 @@ def test_model(config):
                 output_sentences.append(output_sentence)
         elif config.model_type=="trans":
             for batch_idx, data in enumerate(test_loader):
+                print("testing: ",batch_idx,"/",len(test_loader)," ...")
                 history,knowledge,responses=data["history"],data["knowledge"],data["response"]
                 history = pad_sequence(history,batch_first=True, padding_value=0)
                 knowledge = pad_sequence(knowledge,batch_first=True, padding_value=0)
@@ -170,7 +175,6 @@ def test_model(config):
                 if config.use_gpu and USE_CUDA: 
                     history,knowledge= history.cuda() ,knowledge.cuda()
                 #enc_outs =[batchsize,seq,embedding]
-                print("testing: ",batch_idx,"/",len(test_loader)," ...")
                 enc_output = encoder(history,knowledge)
                 #transformer decoder input 是之前生成的所有句子-》注意观察一下POSITION ENCODING 的移位情况
                 decoder_input = torch.LongTensor([SOS_token]).reshape(1,-1) #[batch_size,1]
@@ -191,6 +195,95 @@ def test_model(config):
                 output_sentences.append(output_sentence)
 
     topic_materialization(output_sentences,config.data_dir,config.output_path)
-    text_path=os.path.join(config.data_dir,"text.test.txt")
+    text_path=os.path.join(config.data_dir,"text.test_reduce.txt")
     eval_path=os.path.join(config.data_dir,"result_eval.txt")
     eval(config.output_path,text_path,eval_path)
+def dev(handler):
+    encoder,decoder,config,epoch=handler
+    DuConv_test_DataSet=My_dataset("dev",config.data_dir,config.voc_and_embedding_save_path)
+    dev_loader = DataLoader(dataset=DuConv_test_DataSet,\
+            shuffle=True, batch_size=config.batch_size,drop_last=True,collate_fn=collate_fn)
+    print('-Initializing Evaluate Process...')
+    total_loss=0
+    batch_size=config.batch_size
+    voc=DuConv_test_DataSet.voc
+    output_sentences=[]
+    with torch.no_grad():
+        if config.model_type=="gru":
+            epoch_loss_avg=0
+            for batch_idx, data in enumerate(dev_loader):
+                print("evaluating: ",batch_idx,"/",len(dev_loader)," ...")
+                history,knowledge,responses=data["history"],data["knowledge"],data["response"]
+                #log2020.2.23:之前没有发现padding_sort_transform后每个batch内的顺序变了,必须把idx_unsort 也加进来
+                history,len_history,idx_unsort1 = padding_sort_transform(history)
+                knowledge,len_knowledge,idx_unsort2 = padding_sort_transform(knowledge)
+                responses,len_response,idx_unsort3 = padding_sort_transform(responses)
+                if config.use_gpu and USE_CUDA: 
+                    history,knowledge,responses,idx_unsort1,idx_unsort2,idx_unsort3 = history.cuda() ,\
+                knowledge.cuda() ,responses.cuda(),idx_unsort1.cuda(),idx_unsort2.cuda(),idx_unsort3.cuda()
+                unsort_idxs=(idx_unsort1,idx_unsort2)
+                encoder_outputs, encoder_hidden = encoder(history,len_history,knowledge,len_knowledge,unsort_idxs)
+                decoder_hidden = encoder_hidden[:decoder.n_layers]
+                loss=0
+                MAX_RESPONSE_LENGTH=int(len_response[0].item())-1
+                responses=responses.index_select(1,idx_unsort3)
+                decoder_input = torch.LongTensor([SOS_token for _ in range(batch_size)]).reshape(1,batch_size) #[batch_size,1]
+                decoder_input = decoder_input.to(network.Global_device)
+                for t in range(MAX_RESPONSE_LENGTH):
+                    decoder_output, decoder_hidden, decoder_attn = decoder(
+                    decoder_input, decoder_hidden, encoder_outputs
+                    )
+                #topi为概率最大词汇的下标
+                _, topi = decoder_output.topk(1) # [batch_Size, 1]
+
+                decoder_input = torch.LongTensor([topi[i][0] for i in range(batch_size)]).reshape(1,batch_size)
+                decoder_input = decoder_input.to(network.Global_device)  
+                # decoder_output=[batch_Size, voc]  responses[seq,batchsize]
+                loss += F.cross_entropy(decoder_output, responses[t+1], ignore_index=PAD_token)
+            epoch_loss_avg+=loss.cpu().item() 
+            epoch_loss_avg/=len(dev_loader)
+            print('Evaluate Epoch: {}\t avg Loss: {:.6f}\ttime: {}'.format(
+               epoch,epoch_loss_avg, time.asctime(time.localtime(time.time())) ))
+            with open(config.logfile_path,'a') as f:
+                template=' Evaluate Epoch: {}\tLoss: {:.6f}\ttime: {}\n'
+                str=template.format(epoch,epoch_loss_avg,\
+                    time.asctime(time.localtime(time.time())))
+                f.write(str)
+        elif config.model_type=="trans":
+            epoch_loss_avg=0
+            for batch_idx, data in enumerate(dev_loader):
+                print("evaluating: ",batch_idx,"/",len(dev_loader)," ...")
+                history,knowledge,responses=data["history"],data["knowledge"],data["response"]
+                history = pad_sequence(history,batch_first=True, padding_value=0)
+                knowledge = pad_sequence(knowledge,batch_first=True, padding_value=0)
+                len_respons=[len(it) for it in responses]
+                len_respons.sort()
+                MAX_RESPONSE_LENGTH=len_respons[-1]-1
+                responses =pad_sequence(responses,batch_first=True, padding_value=0)
+                responses=responses.transpose(0,1)
+                if config.use_gpu and USE_CUDA: 
+                    history,knowledge= history.cuda() ,knowledge.cuda()
+                #enc_outs =[batchsize,seq,embedding]
+                enc_output = encoder(history,knowledge)
+                #transformer decoder input 是之前生成的所有句子-》注意观察一下POSITION ENCODING 的移位情况
+                decoder_input = torch.LongTensor([SOS_token for _ in range(batch_size)]).reshape(batch_size,1) #[batch_size,1]
+                decoder_input = decoder_input.to(network.Global_device)
+                loss=0
+                for t in range(MAX_RESPONSE_LENGTH):
+                    decoder_input = decoder_input.to(network.Global_device)
+                    decoder_output, self_attentions, context_attentions = decoder( decoder_input, enc_output )
+                    #TODO:我用的选最后一个加squeeze. [b,l,dim]原文中又是如何变成[b,dim]的？
+                    decoder_output=decoder_output[:,-1,:].squeeze(1)
+                    #topi为概率最大词汇的下标shape=[batch_Size=1,1]
+                    _, topi = decoder_output.topk(1) # [batch_Size=1, 1]
+                    decoder_input=torch.cat((decoder_input,topi),1)
+                    loss += F.cross_entropy(decoder_output, responses[t+1], ignore_index=PAD_token)
+                epoch_loss_avg+=loss.cpu().item() 
+                epoch_loss_avg/=len(dev_loader)
+                print('Evaluate Epoch: {}\t avg Loss: {:.6f}\ttime: {}'.format(
+                epoch,epoch_loss_avg, time.asctime(time.localtime(time.time())) ))
+                with open(config.logfile_path,'a') as f:
+                    template=' Evaluate Epoch: {}\t avg Loss: {:.6f}\ttime: {}\n'
+                    str=template.format(epoch,epoch_loss_avg,\
+                        time.asctime(time.localtime(time.time())))
+                    f.write(str)

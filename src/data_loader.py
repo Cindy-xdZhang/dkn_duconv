@@ -51,7 +51,7 @@ class My_dataset(Dataset):
         #对response,history,knowkedge idx化但不padding，
         # 后续进网络每个batch交给torch.nn.utils.rnn.pad_sequence 进行padding
         voc.idx_corpus(data)
-        return data,voc
+        return data[0:21],voc
     def __getitem__(self, index):
         return self.data[index]
     def __len__(self):
@@ -79,8 +79,8 @@ history:
 'response': [186, 19, 2389, 43, 19, 393, 985, 901, 29, 2]
 'knowledge': [24, 509, 4706, 24, 8859, 227, 21509, 1314, 1628, 408, 289, 24, 125, 2]
 v0.0.3 
-response,history每一句加上sos_token，knowledge每个spo间以EOS（2）分割
-'knowledge': [24, 125, 31125, 2,  24, 6858, 278, 0, 981, 75, 153, 2 ]
+response,history每一句加上sos_token，knowledge每个spo间以PAD（2）分割
+'knowledge': [24, 125, 31125, 0,  24, 6858, 278, 981, 75, 153, 0 ]
 history': [1, 132, 71, 133, 134, 28, 29, 2, 1, 126, 21, 97, 19, 67, 135, 133, 26, 136, 43, 29, 2]
 'response': [1, 24, 137, 138, 101, 134, 96, 19, 106, 139, 104, 29, 2]}
 v0.0.4:

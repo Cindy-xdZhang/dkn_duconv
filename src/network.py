@@ -293,8 +293,8 @@ class TransfomerDecoder(nn.Module):
         output=self.pos_embedding(self.seq_embedding(decoder_inputs))
         # padding_mask requires that seq_k和seq_q的形状都是[B,L]
         #self_attention_padding_mask=[B,L,L]
-        self_attention_padding_mask = padding_mask(decoder_inputs)
-        seq_mask = sequence_mask(decoder_inputs)
+        self_attention_padding_mask = padding_mask(decoder_inputs).to(Global_device)
+        seq_mask = sequence_mask(decoder_inputs).to(Global_device)
         #self_attn_mask=[B,L,L]
         self_attn_mask = (torch.gt((self_attention_padding_mask.float() + seq_mask.float()), 0)).float()
         self_attentions = []
