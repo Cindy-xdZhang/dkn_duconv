@@ -51,7 +51,7 @@ class My_dataset(Dataset):
         #对response,history,knowkedge idx化但不padding，
         # 后续进网络每个batch交给torch.nn.utils.rnn.pad_sequence 进行padding
         voc.idx_corpus(data)
-        return data[0:21],voc
+        return data,voc
     def __getitem__(self, index):
         return self.data[index]
     def __len__(self):
