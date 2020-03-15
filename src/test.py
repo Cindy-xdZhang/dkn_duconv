@@ -130,6 +130,7 @@ def eval(result_file, sample_file, eval_file):
         print(output_str)
 def test_model(config):
     print('-Test:loading dataset...')
+    pre_check_path=os.path.join(config.data_dir,"pre_check.txt")
     DuConv_test_DataSet=My_dataset("test",config.data_dir,config.voc_and_embedding_save_path)
     #test时batchsize=1
     test_loader = DataLoader(dataset=DuConv_test_DataSet,\
@@ -163,6 +164,10 @@ def test_model(config):
                 output_words, score=output_words_list[0]
                 output_sentence = ' '.join(output_words)
                 output_sentences.append(output_sentence)
+                with open(pre_check_path,'a') as f:
+                    template='Re:\t'+output_sentence+"\n"
+                    str=template.format
+                    f.write(str)
         elif config.model_type=="trans":
             for batch_idx, data in enumerate(test_loader):
                 print("testing: ",batch_idx,"/",len(test_loader)," ...")
@@ -192,6 +197,10 @@ def test_model(config):
                 decoder_input=decoder_input.squeeze(0).numpy().tolist()
                 decoder_input_str=[voc.index2word[x] for x in decoder_input]
                 output_sentence = ' '.join(decoder_input_str)
+                with open(pre_check_path,'a') as f:
+                    template='Re:\t'+output_sentence+"\n"
+                    str=template.format
+                    f.write(str)
                 output_sentences.append(output_sentence)
 
     topic_materialization(output_sentences,config.data_dir,config.output_path)
@@ -212,7 +221,6 @@ def dev(handler):
         if config.model_type=="gru":
             epoch_loss_avg=0
             for batch_idx, data in enumerate(dev_loader):
-                print("evaluating: ",batch_idx,"/",len(dev_loader)," ...")
                 history,knowledge,responses=data["history"],data["knowledge"],data["response"]
                 #log2020.2.23:之前没有发现padding_sort_transform后每个batch内的顺序变了,必须把idx_unsort 也加进来
                 history,len_history,idx_unsort1 = padding_sort_transform(history)
@@ -252,7 +260,6 @@ def dev(handler):
         elif config.model_type=="trans":
             epoch_loss_avg=0
             for batch_idx, data in enumerate(dev_loader):
-                print("evaluating: ",batch_idx,"/",len(dev_loader)," ...")
                 history,knowledge,responses=data["history"],data["knowledge"],data["response"]
                 history = pad_sequence(history,batch_first=True, padding_value=0)
                 knowledge = pad_sequence(knowledge,batch_first=True, padding_value=0)
@@ -279,11 +286,11 @@ def dev(handler):
                     decoder_input=torch.cat((decoder_input,topi),1)
                     loss += F.cross_entropy(decoder_output, responses[t+1], ignore_index=PAD_token)
                 epoch_loss_avg+=loss.cpu().item() 
-                epoch_loss_avg/=len(dev_loader)
-                print('Evaluate Epoch: {}\t avg Loss: {:.6f}\ttime: {}'.format(
-                epoch,epoch_loss_avg, time.asctime(time.localtime(time.time())) ))
-                with open(config.logfile_path,'a') as f:
-                    template=' Evaluate Epoch: {}\t avg Loss: {:.6f}\ttime: {}\n'
-                    str=template.format(epoch,epoch_loss_avg,\
-                        time.asctime(time.localtime(time.time())))
-                    f.write(str)
+            epoch_loss_avg/=len(dev_loader)
+            print('Evaluate Epoch: {}\t avg Loss: {:.6f}\ttime: {}'.format(
+            epoch,epoch_loss_avg, time.asctime(time.localtime(time.time())) ))
+            with open(config.logfile_path,'a') as f:
+                template=' Evaluate Epoch: {}\t avg Loss: {:.6f}\ttime: {}\n'
+                str=template.format(epoch,epoch_loss_avg,\
+                    time.asctime(time.localtime(time.time())))
+                f.write(str)

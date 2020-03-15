@@ -102,21 +102,23 @@ class Vocabulary:
         elif isinstance(sentence, list): 
             tokens_list = [self.encoding_sentence(t,max_length=max_length,form=form) for t in sentence]
             return tokens_list
-    def idx2sentence(self,sentence,max_length=MAX_TITLE_LENGTH):
-        if isinstance(sentence, str): 
-            array = sentence.split(',')
-            word_encoding = ['EOS'] * max_length
-            point = 0
-            for s in array:
-                if int(s) in self.index2word:
-                    word_encoding[point] = str(self.index2word[int(s)])
-                    point += 1
-                if point == max_length:
-                    break
-            word_encoding = ' '.join(word_encoding)
-            return word_encoding
+    def idx2sentence(self,sentence,no_padding=False,max_length=MAX_TITLE_LENGTH,):
+        if isinstance(sentence, str):
+            if no_padding ==False: 
+                array = sentence.split(',')
+                word_encoding = ['EOS'] * max_length
+                point = 0
+                for s in array:
+                    if int(s) in self.index2word:
+                        word_encoding[point] = str(self.index2word[int(s)])
+                        point += 1
+                    if point == max_length:
+                        break
+                word_encoding = ' '.join(word_encoding)
+                return word_encoding
+            else:return [str(self.index2word[int(ix)]) for ix in sentence]
         elif isinstance(sentence, list): 
-            tokens_list = [self.idx2sentence(t) for t in sentence]
+            tokens_list = [self.idx2sentence(t,max_length,no_padding) for t in sentence]
             return tokens_list
 class KnowledgeList:#UniqID
     def __init__(self):
@@ -226,14 +228,12 @@ def _check_KnowledgeList_and_Vocabulary_implementation():
     # path_raw=os.path.join("data","duconv","train.txt")
     # path_sample=os.path.join("data","duconv","sample.train.txt")
     #convert_session_to_sample(path_raw,path_sample)
-    path_sample=os.path.join("data","duconv","train.txt")
-    path_sample2=os.path.join("data","duconv","text.train.txt")
-    path_sample3=os.path.join("data","duconv","topic.train.txt")
+    path_sample2=os.path.join("dkn_duconv","duconv_data","text.train.txt")
     # data_preprocess(path_sample,path_sample2,path_sample3)
     train_data=parse_json_txtfile(path_sample2)     
-    voc=word_index(train_data)
+    voc=word_index(train_data,"./dkn_duconv")
     
-    # build_embedding(voc)
+    build_embedding(voc)
 
     # knowledge=entity_index(train_data)
     # for _ in range(5):

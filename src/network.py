@@ -226,18 +226,12 @@ class TransfomerEncoder(nn.Module):
                 config.hidden_size, config.n_heads, config.k_dims, config.v_dims, config.dropout,self.mh_w_qs2,self.mh_w_vs2,self.mh_w_fc2)
             for _ in range(config.n_layers)
         ])
-        #  enc_output = self.layer_norm(enc_output)
-        # self.fc_out = nn.Sequential(
-        #     nn.Dropout(dropout),
-        #     nn.Linear(embedding_size, config.hidden_size*2),
-        #     nn.ReLU(inplace=True)
-        # )
 
     def forward(self, char_his, kg):
         #history_embedded=[batchsize, seq=~106,embeddingsize=300]
-        history_embedded= self.dropout(self.pos_embedding(self.char_embedding(char_his)))
+        history_embedded= (self.pos_embedding(self.char_embedding(char_his)))
         #kg_embed=[batchsize, seq=~103,embeddingsize=300]
-        kg_embed=self.dropout(self.pos_embedding(self.char_embedding(kg)))
+        kg_embed=(self.pos_embedding(self.char_embedding(kg)))
         for layer in self.layer_stack_kg:
             history_embedded, _ = layer(history_embedded)
         if self.Ws_kg !=None:
@@ -255,14 +249,13 @@ class TransfomerEncoder(nn.Module):
         # return self.fc_out(enc_outs)
         return inputs_src
 class TransfomerDecoder(nn.Module):
-    def __init__(self,config,embedding,pos_embedding,voc_size,ffn_dim=512):
+    def __init__(self,config,embedding,embedding_size,pos_embedding,voc_size,ffn_dim=512):
         super(TransfomerDecoder, self).__init__()
         self.seq_embedding = embedding
         self.pos_embedding = pos_embedding
         if config.shareW==True:
             d_k=config.k_dims//config.n_heads
             d_v=config.k_dims//config.n_heads
-            embedding_size=300
             self.mh_w_qs1=nn.Linear(embedding_size, config.n_heads * d_k)
             self.mh_w_vs1=nn.Linear(embedding_size, config.n_heads * d_v)
             self.mh_w_fc1=nn.Linear( config.n_heads * d_v,embedding_size)
@@ -281,10 +274,10 @@ class TransfomerDecoder(nn.Module):
             self.mh_w_qs2=None
             self.mh_w_vs2=None
             self.mh_w_fc2=None    
-        self.decoder_layers = nn.ModuleList([DecoderLayer(300, config.k_dims, config.v_dims, \
+        self.decoder_layers = nn.ModuleList([DecoderLayer(embedding_size, config.k_dims, config.v_dims, \
             config.n_heads, ffn_dim, config.dropout,self.mh_w_qs1,self.mh_w_vs1,self.mh_w_fc1,\
                 self.mh_w_qs2,self.mh_w_vs2,self.mh_w_fc2) for _ in range(config.n_layers)])
-        self.final_transformer_linear = nn.Linear(300, voc_size, bias=False)
+        self.final_transformer_linear = nn.Linear(embedding_size, voc_size, bias=False)
         self.final_transformer_softmax = nn.Softmax(dim=2)
 
     def forward(self, decoder_inputs, enc_output, context_attn_mask=None):

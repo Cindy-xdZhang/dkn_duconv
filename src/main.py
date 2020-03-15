@@ -20,6 +20,7 @@ from optimiser import ScheduledOptim
 USE_CUDA = torch.cuda.is_available() 
 torch.backends.cudnn.enabled = True
 torch.backends.cudnn.benchmark = True
+WORD_EMBEDDING_DIM_NO_PRETRAIN=30
 def arg_config():
     def print_config_information(config):
         print('======================model===============================')
@@ -30,6 +31,9 @@ def arg_config():
         print('--n_heads: '+str(config.n_heads))
         print('--n_layers: '+str(config.n_layers))
         print('--attn: '+str(config.attn))
+        print('--select_kg: '+str(config.select_kg))
+        print('--pre_train_embedding: '+str(config.pre_train_embedding))
+        print('--shareW: '+str(config.shareW))
         if config.continue_training==" ":
             print('--continue_training(load model from checkpoint): NONE')
         else :
@@ -37,7 +41,6 @@ def arg_config():
         print('================hyper parameters===========================')
         print('--run_type: '+str(config.run_type))
         print('--batch_size: '+str(config.batch_size))
-        print('--optimizer: '+str(config.optimizer))
         print('--learning rate: '+str(config.lr))
         print('--save_iteration: '+str(config.save_iteration))
         print('===========================================================')
@@ -45,7 +48,7 @@ def arg_config():
     parser = argparse.ArgumentParser()
     # Network CMD参数组
     net_arg = parser.add_argument_group("Network")
-    net_arg.add_argument("--model_type", type=str, default='trans',
+    net_arg.add_argument("-m","--model_type", type=str, default='trans',
                          choices=['trans', 'gru'])
     net_arg.add_argument('-hi',"--hidden_size", type=int, default=512)
     net_arg.add_argument("--n_layers", type=int, default=6)
@@ -57,14 +60,14 @@ def arg_config():
     net_arg.add_argument("--n_heads", type=int, default=8)
     net_arg.add_argument("--shareW", type=str2bool, default=False)
     net_arg.add_argument('-sk', "--select_kg", type=str2bool, default=True)
+    net_arg.add_argument('-pre', "--pre_train_embedding", type=str2bool, default=False)
 
     # Training / Testing CMD参数组
     train_arg = parser.add_argument_group("Training")
     train_arg.add_argument("--n_warmup_steps", type=int, default=4000)
-    train_arg.add_argument('-bs',"--batch_size", type=int, default=2)
-    train_arg.add_argument('-r',"--run_type", type=str, default="test",
+    train_arg.add_argument('-bs',"--batch_size", type=int, default=1)
+    train_arg.add_argument('-r',"--run_type", type=str, default="train",
      choices=['train', 'test'])
-    train_arg.add_argument("--optimizer", type=str, default="Adam")
     train_arg.add_argument('-lr',"--lr", type=float, default=0.002)#for transformer init lr will expand 1000times.so recommendation is 0.002
     train_arg.add_argument("--end_epoch", type=int, default=13)
     gen_arg = parser.add_argument_group("Generation")
@@ -74,7 +77,7 @@ def arg_config():
     # MISC ：logs,dirs and gpu config
     misc_arg = parser.add_argument_group("Misc")
     misc_arg.add_argument('-u', "--use_gpu", type=str2bool, default=True)
-    misc_arg.add_argument("--multi_gpu", type=str2bool, default=True)
+    misc_arg.add_argument("--multi_gpu", type=str2bool, default=False)
     misc_arg.add_argument('-p',"--log_steps", type=int, default=1)
     misc_arg.add_argument('-s',"--save_iteration", type=int, default=5,help='Every save_iteration iteration(s) save checkpoint model ')   
     #路径参数
@@ -83,7 +86,7 @@ def arg_config():
     misc_arg.add_argument("--voc_and_embedding_save_path", type=str,  default="dkn_duconv",help="The path for voc and embedding file.")
     misc_arg.add_argument("--output_path", type=str, default="dkn_duconv/output/")
     misc_arg.add_argument("--save_model_path", type=str, default="dkn_duconv/models")
-    misc_arg.add_argument('-con',"--continue_training", type=str, default="dkn_duconv/models/trans/L6_H512/Epo_10_iter_00020.tar")
+    misc_arg.add_argument('-con',"--continue_training", type=str, default=" ")
     misc_arg.add_argument('-log',"--logfile_path", type=str, default="./log.txt")
     config = parser.parse_args()
     print_config_information(config)
@@ -95,21 +98,21 @@ def arg_config():
 def build_models(voc,config,checkpoint):
     voc_size=voc.n_words
     hidden_size=config.hidden_size
+    WORD_EMBEDDING_DIMs=WORD_EMBEDDING_DIM if config.pre_train_embedding==True else WORD_EMBEDDING_DIM_NO_PRETRAIN
     if config.model_type =="gru":
         #embedding在encoder 和decoder外面因为他们共用embedding
-        embedding_layer = nn.Embedding(voc_size, WORD_EMBEDDING_DIM)
-        embedding_layer.weight.data.copy_(torch.from_numpy(build_embedding(voc,config.voc_and_embedding_save_path)))
-        
-        encoder = network.EncoderRNN(hidden_size, WORD_EMBEDDING_DIM, embedding_layer, config.n_layers, config.dropout)
+        embedding_layer = nn.Embedding(voc_size, WORD_EMBEDDING_DIMs)
+        if config.pre_train_embedding==True:embedding_layer.weight.data.copy_(torch.from_numpy(build_embedding(voc,config.voc_and_embedding_save_path)))
+        encoder = network.EncoderRNN(hidden_size, WORD_EMBEDDING_DIMs, embedding_layer, config.n_layers, config.dropout)
         attn_model = config.attn
-        decoder = network.LuongAttnDecoderRNN(attn_model, embedding_layer,WORD_EMBEDDING_DIM, hidden_size, voc_size,\
+        decoder = network.LuongAttnDecoderRNN(attn_model, embedding_layer,WORD_EMBEDDING_DIMs, hidden_size, voc_size,\
             config.n_layers, config.dropout)
     elif config.model_type =="trans":
-        voc_embedding_layer = nn.Embedding(voc_size, WORD_EMBEDDING_DIM)
-        voc_embedding_layer.weight.data.copy_(torch.from_numpy(build_embedding(voc,config.voc_and_embedding_save_path)))
-        pos_embedding_layer=network.PositionalEncoding(WORD_EMBEDDING_DIM,n_position=300)
-        encoder =network.TransfomerEncoder(config,voc_embedding_layer,pos_embedding_layer)
-        decoder =network.TransfomerDecoder(config,voc_embedding_layer,pos_embedding_layer,voc_size)
+        voc_embedding_layer = nn.Embedding(voc_size, WORD_EMBEDDING_DIMs)
+        if config.pre_train_embedding==True:voc_embedding_layer.weight.data.copy_(torch.from_numpy(build_embedding(voc,config.voc_and_embedding_save_path)))
+        pos_embedding_layer=network.PositionalEncoding(WORD_EMBEDDING_DIMs,n_position=300)
+        encoder =network.TransfomerEncoder(config,voc_embedding_layer,pos_embedding_layer,WORD_EMBEDDING_DIMs)
+        decoder =network.TransfomerDecoder(config,voc_embedding_layer,WORD_EMBEDDING_DIMs,pos_embedding_layer,voc_size)
     else: raise Exception("model type error!")
     #model 大小计算
     encoder_para = sum([np.prod(list(p.size())) for p in encoder.parameters()])
@@ -188,10 +191,10 @@ def train_trans(config):
     print('-Building optimizers ...')
     encoder_optimizer = ScheduledOptim(
         optim.Adam(encoder.parameters(), betas=(0.9, 0.98), eps=1e-09),
-        config.lr*1000, config.hidden_size, config.n_warmup_steps)
+        config.lr, config.hidden_size, config.n_warmup_steps)
     decoder_optimizer = ScheduledOptim(
         optim.Adam(decoder.parameters(), betas=(0.9, 0.98), eps=1e-09),
-        config.lr*1000, config.hidden_size, config.n_warmup_steps)    
+        config.lr, config.hidden_size, config.n_warmup_steps)    
 
     if checkpoint != None:
         encoder_optimizer.load_state_dict(checkpoint['en_opt'])
@@ -254,9 +257,9 @@ def trainIter_trans(train_handler):
             
             loss += F.cross_entropy(decoder_output, responses[t+1], ignore_index=PAD_token)
         loss.backward()
-        clip = 50.0
-        _ = torch.nn.utils.clip_grad_norm_(encoder.parameters(), clip)
-        _ = torch.nn.utils.clip_grad_norm_(decoder.parameters(), clip)
+        # clip = 50.0
+        # _ = torch.nn.utils.clip_grad_norm_(encoder.parameters(), clip)
+        # _ = torch.nn.utils.clip_grad_norm_(decoder.parameters(), clip)
         encoder_optimizer.step_and_update_lr()    
         decoder_optimizer.step_and_update_lr()  
         stage_total_loss+=loss.cpu().item() 
