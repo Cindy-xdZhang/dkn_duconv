@@ -147,7 +147,6 @@ def data_preprocess(path_raw,text_file,topic_file,topic_generalization=True,test
                                 sample["history"] =  tokenize(generize(sample["history"],value, key))
                                 sample["response"] =  tokenize(generize(sample["response"],value, key))
                                 # model_text = model_text.replace(value, key)     
-            
                         topic_dict = json.dumps(topic_dict, ensure_ascii=False)
                         model_text=json.dumps(sample, ensure_ascii=False)
                         fout_text.write(model_text + "\n")
@@ -188,7 +187,6 @@ def data_preprocess(path_raw,text_file,topic_file,topic_generalization=True,test
                             sample["history"] =  tokenize(generize(sample["history"],value, key))
                             sample["response"] =  tokenize(generize(sample["response"],value, key))
                             # model_text = model_text.replace(value, key)     
-
                     topic_dict = json.dumps(topic_dict, ensure_ascii=False)
                     model_text=json.dumps(sample, ensure_ascii=False)
                     fout_text.write(model_text + "\n")
@@ -200,7 +198,10 @@ def data_preprocess(path_raw,text_file,topic_file,topic_generalization=True,test
 
     sample2multi_generize_topic(path_raw,text_file,topic_file)
 
-
+#TODO:
+#    sample["knowledge"] = re.sub("[\s+\.\!\/_,$%^*(+\"\']+|[+——！，。？、~@#￥%……&*（）]", "", sample["knowledge"])
+#                         sample["history"] = re.sub("[\s+\.\!\/_,$%^*(+\"\']+|[+——！，。？、~@#￥%……&*（）]", "", sample["knowledge"])
+#                         sample["response"] = re.sub("[\s+\.\!\/_,$%^*(+\"\']+|[+——！，。？、~@#￥%……&*（）]", "", sample["knowledge"])
 if __name__ == "__main__":
     try:
         # data_preprocess(sys.argv[1],sys.argv[2],sys.argv[3])

@@ -50,7 +50,7 @@ def arg_config():
     net_arg = parser.add_argument_group("Network")
     net_arg.add_argument("-m","--model_type", type=str, default='gru',
                          choices=['trans', 'gru'])
-    net_arg.add_argument('-hi',"--hidden_size", type=int, default=128)
+    net_arg.add_argument('-hi',"--hidden_size", type=int, default=256)
     net_arg.add_argument("--n_layers", type=int, default=1)
     net_arg.add_argument("--attn", type=str, default='general',
                          choices=['none', 'concat', 'dot', 'general'])
@@ -65,10 +65,10 @@ def arg_config():
     # Training / Testing CMD参数组
     train_arg = parser.add_argument_group("Training")
     train_arg.add_argument("--n_warmup_steps", type=int, default=4000)
-    train_arg.add_argument('-bs',"--batch_size", type=int, default=5)
+    train_arg.add_argument('-bs',"--batch_size", type=int, default=2)
     train_arg.add_argument('-r',"--run_type", type=str, default="train",
      choices=['train', 'test'])
-    train_arg.add_argument('-lr',"--lr", type=float, default=0.005)#for transformer init lr will expand 1000times.so recommendation is 0.002
+    train_arg.add_argument('-lr',"--lr", type=float, default=0.0005)
     train_arg.add_argument("--end_epoch", type=int, default=50)
     gen_arg = parser.add_argument_group("Generation")
     gen_arg.add_argument("--beam_size", type=int, default=3)
@@ -78,15 +78,15 @@ def arg_config():
     misc_arg = parser.add_argument_group("Misc")
     misc_arg.add_argument('-u', "--use_gpu", type=str2bool, default=True)
     misc_arg.add_argument("--multi_gpu", type=str2bool, default=False)
-    misc_arg.add_argument('-p',"--log_steps", type=int, default=10000)
-    misc_arg.add_argument('-s',"--save_iteration", type=int, default=50,help='Every save_iteration iteration(s) save checkpoint model ')   
+    misc_arg.add_argument('-p',"--log_steps", type=int, default=10)
+    misc_arg.add_argument('-s',"--save_iteration", type=int, default=100,help='Every save_iteration iteration(s) save checkpoint model ')   
     #路径参数
     misc_arg.add_argument('-i',"--data_dir", type=str,  default="C:\\Users\\10718\\PycharmProjects\\dkn_duconv\\duconv_data",\
         help="The input text data path.")
     misc_arg.add_argument("--voc_and_embedding_save_path", type=str,  default="dkn_duconv",help="The path for voc and embedding file.")
     misc_arg.add_argument("--output_path", type=str, default="dkn_duconv/output/")
     misc_arg.add_argument("--save_model_path", type=str, default="dkn_duconv/models")
-    misc_arg.add_argument('-con',"--continue_training", type=str, default=" ")
+    misc_arg.add_argument('-con',"--continue_training", type=str, default="dkn_duconv\\models\\gru\L1_H256_general\\Epo_05_iter_000100.tar")
     misc_arg.add_argument('-log',"--logfile_path", type=str, default="./log.txt")
     config = parser.parse_args()
     print_config_information(config)
@@ -220,7 +220,7 @@ def train_trans(config):
                 str=template.format(epoch_id, epoch_loss,time.asctime(time.localtime(time.time())))
                 print(str)
                 f.write(str)
-        dev_handeler=(encoder,decoder,config,epoch_id,dev_loader)
+        dev_handeler=(encoder,decoder,config,epoch_id,DuConv_DataSet.voc,dev_loader)
         dev(dev_handeler)
 def trainIter_trans(train_handler):
     epoch,start_iteration,train_loader,encoder,decoder,encoder_optimizer,decoder_optimizer,config=train_handler
@@ -320,7 +320,7 @@ def train_gru(config):
                 str=template.format(epoch_id, epoch_loss,time.asctime(time.localtime(time.time())))
                 print(str)
                 f.write(str)
-        dev_handeler=(encoder,decoder,config,epoch_id,dev_loader)
+        dev_handeler=(encoder,decoder,config,epoch_id,DuConv_DataSet.voc,dev_loader)
         dev(dev_handeler)
 def trainIter_gru(train_handler):
     epoch,start_iteration,train_loader,encoder,decoder,encoder_optimizer,decoder_optimizer,config=train_handler
@@ -362,7 +362,7 @@ def trainIter_gru(train_handler):
             decoder_input = torch.LongTensor([topi[i][0] for i in range(batch_size)]).reshape(1,batch_size)
             decoder_input = decoder_input.to(network.Global_device)  
             # decoder_output=[batch_Size, voc]  responses[seq,batchsize]
-            loss += F.cross_entropy(decoder_output, responses[t+1], ignore_index=PAD_token)
+            loss += F.cross_entropy(decoder_output, responses[t+1], ignore_index=EOS_token)
         loss.backward()
         clip = 50.0
         _ = torch.nn.utils.clip_grad_norm_(encoder.parameters(), clip)

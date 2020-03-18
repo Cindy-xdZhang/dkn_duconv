@@ -131,6 +131,8 @@ def eval(result_file, sample_file, eval_file):
 def test_model(config):
     print('-Test:loading dataset...')
     pre_check_path=os.path.join(config.data_dir,"pre_check.txt")
+    if os.path.exists(pre_check_path): 
+        os.remove(pre_check_path) 
     DuConv_test_DataSet=My_dataset("test",config.data_dir,config.voc_and_embedding_save_path)
     #test时batchsize=1
     test_loader = DataLoader(dataset=DuConv_test_DataSet,\
@@ -164,10 +166,9 @@ def test_model(config):
                 output_words, score=output_words_list[0]
                 output_sentence = ' '.join(output_words)
                 output_sentences.append(output_sentence)
-                with open(pre_check_path,'a') as f:
+                with open(pre_check_path,'a',encoding='utf-8') as f:
                     template='Re:\t'+output_sentence+"\n"
-                    str=template.format
-                    f.write(str)
+                    f.write(template)
         elif config.model_type=="trans":
             for batch_idx, data in enumerate(test_loader):
                 print("testing: ",batch_idx,"/",len(test_loader)," ...")
@@ -197,9 +198,9 @@ def test_model(config):
                 decoder_input=decoder_input.squeeze(0).numpy().tolist()
                 decoder_input_str=[voc.index2word[x] for x in decoder_input]
                 output_sentence = ' '.join(decoder_input_str)
-                with open(pre_check_path,'a') as f:
+                with open(pre_check_path,'a',encoding='utf-8') as f:
                     template='Re:\t'+output_sentence+"\n"
-                    str=template.format
+                    str=template
                     f.write(str)
                 output_sentences.append(output_sentence)
 
@@ -208,11 +209,9 @@ def test_model(config):
     eval_path=os.path.join(config.data_dir,"result_eval.txt")
     eval(config.output_path,text_path,eval_path)
 def dev(handler):
-    encoder,decoder,config,epoch,dev_loader=handler
-    print('-Initializing Evaluate Process...')
+    encoder,decoder,config,epoch,voc,dev_loader=handler
     total_loss=0
     batch_size=config.batch_size
-    voc=DuConv_test_DataSet.voc
     output_sentences=[]
     with torch.no_grad():
         if config.model_type=="gru":
