@@ -51,7 +51,7 @@ class My_dataset(Dataset):
         #对response,history,knowkedge idx化但不padding，
         # 后续进网络每个batch交给torch.nn.utils.rnn.pad_sequence 进行padding
         voc.idx_corpus(data)
-        return data,voc
+        return data[0:200],voc
     def __getitem__(self, index):
         return self.data[index]
     def __len__(self):
@@ -71,11 +71,6 @@ v0.0.1:
 
 """
 
-
-my=My_dataset()
-
-for id in range(4):
-    print(my[id])
 
 #以下代码测试torch.nn.utils.rnn.pack_padded_sequence表明变成序列不能长度为0
 # RuntimeError: Length of all samples has to be greater than 0, but found an element in 'lengths' that is <= 0

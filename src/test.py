@@ -208,10 +208,7 @@ def test_model(config):
     eval_path=os.path.join(config.data_dir,"result_eval.txt")
     eval(config.output_path,text_path,eval_path)
 def dev(handler):
-    encoder,decoder,config,epoch=handler
-    DuConv_test_DataSet=My_dataset("dev",config.data_dir,config.voc_and_embedding_save_path)
-    dev_loader = DataLoader(dataset=DuConv_test_DataSet,\
-            shuffle=True, batch_size=config.batch_size,drop_last=True,collate_fn=collate_fn)
+    encoder,decoder,config,epoch,dev_loader=handler
     print('-Initializing Evaluate Process...')
     total_loss=0
     batch_size=config.batch_size
@@ -241,14 +238,14 @@ def dev(handler):
                     decoder_output, decoder_hidden, decoder_attn = decoder(
                     decoder_input, decoder_hidden, encoder_outputs
                     )
-                #topi为概率最大词汇的下标
-                _, topi = decoder_output.topk(1) # [batch_Size, 1]
+                    #topi为概率最大词汇的下标
+                    _, topi = decoder_output.topk(1) # [batch_Size, 1]
 
-                decoder_input = torch.LongTensor([topi[i][0] for i in range(batch_size)]).reshape(1,batch_size)
-                decoder_input = decoder_input.to(network.Global_device)  
-                # decoder_output=[batch_Size, voc]  responses[seq,batchsize]
-                loss += F.cross_entropy(decoder_output, responses[t+1], ignore_index=PAD_token)
-            epoch_loss_avg+=loss.cpu().item() 
+                    decoder_input = torch.LongTensor([topi[i][0] for i in range(batch_size)]).reshape(1,batch_size)
+                    decoder_input = decoder_input.to(network.Global_device)  
+                    # decoder_output=[batch_Size, voc]  responses[seq,batchsize]
+                    loss += F.cross_entropy(decoder_output, responses[t+1], ignore_index=PAD_token)
+                epoch_loss_avg+=loss.cpu().item() 
             epoch_loss_avg/=len(dev_loader)
             print('Evaluate Epoch: {}\t avg Loss: {:.6f}\ttime: {}'.format(
                epoch,epoch_loss_avg, time.asctime(time.localtime(time.time())) ))

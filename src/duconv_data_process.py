@@ -204,9 +204,9 @@ def data_preprocess(path_raw,text_file,topic_file,topic_generalization=True,test
 if __name__ == "__main__":
     try:
         # data_preprocess(sys.argv[1],sys.argv[2],sys.argv[3])
-        path_sample=os.path.join("dkn_duconv","duconv_data","test_1.txt")
-        path_sample2=os.path.join("dkn_duconv","duconv_data","text.test.txt")
-        path_sample3=os.path.join("dkn_duconv","duconv_data","topic.test.txt")
-        data_preprocess(path_sample,path_sample2,path_sample3,test=True)
+        path_sample=os.path.join("dkn_duconv","duconv_data","dev.txt")
+        path_sample2=os.path.join("dkn_duconv","duconv_data","text.dev.txt")
+        path_sample3=os.path.join("dkn_duconv","duconv_data","topic.dev.txt")
+        data_preprocess(path_sample,path_sample2,path_sample3,test=False)
     except KeyboardInterrupt:
         print("\nExited from the program ealier!")
