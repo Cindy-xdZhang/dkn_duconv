@@ -13,6 +13,30 @@ import torch.nn.functional as F
 from transformer_sublayers import *
 Global_device="cpu"
 #=========================GRU seq2seq=================================
+class EncoderRNN_noKG(nn.Module):
+    def __init__(self, hidden_size, embedding_size, embedding, n_layers=1, dropout=0):
+        super(EncoderRNN_noKG, self).__init__()
+        self.n_layers = n_layers
+        self.hidden_size = hidden_size
+        self.embedding = embedding
+        self.gru_History = nn.GRU(embedding_size, hidden_size, n_layers,
+                        dropout=(0 if n_layers == 1 else dropout), bidirectional=True,batch_first =False)
+        #GRU的 output: (seq_len, batch, hidden*n_dir) ,
+        # hidden_kg=( num_layers * num_directions, batch,hidden_size)
+        # batch first 只影响output 不影响hidden的形状 所以batch first=false格式更统一
+        self.W1=torch.nn.Linear(self.hidden_size*2, self.hidden_size, bias=True)
+        self.PReLU1=torch.nn.PReLU()
+
+    def forward(self, input_history_seq,input_history_lengths,input_kg_seq,input_kg_lengths, unsort_idxs):
+        unsort_idx_history,unsort_idx_kg=unsort_idxs
+        #history
+        input_history_seq_embedded = self.embedding(input_history_seq)
+        input_history_seq_packed = torch.nn.utils.rnn.pack_padded_sequence(input_history_seq_embedded, input_history_lengths,batch_first=False)
+        his_outputs, hidden_his= self.gru_History(input_history_seq_packed, None)
+        his_outputs, _ = torch.nn.utils.rnn.pad_packed_sequence(his_outputs,batch_first=False)
+        his_outputs=his_outputs.index_select(1,unsort_idx_history)
+        his_outputs = his_outputs[:, :, :self.hidden_size] + his_outputs[:, : ,self.hidden_size:] # Sum bidirectional outputs (batch, 1, hidden)
+        return his_outputs, hidden_his
 class EncoderRNN(nn.Module):
     def __init__(self, hidden_size, embedding_size, embedding, n_layers=1, dropout=0):
         super(EncoderRNN, self).__init__()
@@ -170,7 +194,7 @@ class PositionalEncoding(nn.Module):
         # TODO: make it with torch instead of numpy
 
         def get_position_angle_vec(position):
-            return [position / np.power(10000, 2 * (hid_j // 2) / d_hid) for hid_j in range(d_hid)]
+            return [position / np.power(10000, (2 * hid_j  / d_hid)) for hid_j in range(d_hid)]
 
         sinusoid_table = np.array([get_position_angle_vec(pos_i) for pos_i in range(n_position)])
         sinusoid_table[:, 0::2] = np.sin(sinusoid_table[:, 0::2])  # dim 2i
@@ -231,22 +255,24 @@ class TransfomerEncoder(nn.Module):
         #history_embedded=[batchsize, seq=~106,embeddingsize=300]
         history_embedded= (self.pos_embedding(self.char_embedding(char_his)))
         #kg_embed=[batchsize, seq=~103,embeddingsize=300]
-        kg_embed=(self.pos_embedding(self.char_embedding(kg)))
+        #kg_embed=(self.pos_embedding(self.char_embedding(kg)))
         for layer in self.layer_stack_kg:
             history_embedded, _ = layer(history_embedded)
-        if self.Ws_kg !=None:
-            info_embed=torch.cat((kg_embed,history_embedded),1)
-            info_embed = info_embed.transpose(1, 2)
-            kg_embed=self.Ws_kg(info_embed)
-            kg_embed = info_embed.transpose(1, 2)
-        #kg_embed(layer)=[b,s,embedding size] ->layer不变dim
-        for layer in self.layer_stack_his:
-            kg_embed, _ = layer(kg_embed)
+        # if self.Ws_kg !=None:
+        #     info_embed=torch.cat((kg_embed,history_embedded),1)
+        #     info_embed = info_embed.transpose(1, 2)
+        #     kg_embed=self.Ws_kg(info_embed)
+        #     kg_embed = info_embed.transpose(1, 2)
+        # #kg_embed(layer)=[b,s,embedding size] ->layer不变dim
+        # for layer in self.layer_stack_his:
+        #     kg_embed, _ = layer(kg_embed)
         
-        inputs_src=torch.cat((history_embedded,kg_embed),dim=1)
+        # inputs_src=torch.cat((history_embedded,kg_embed),dim=1)
+        inputs_src=history_embedded
         # enc_outs = inputs_src.permute(0, 2, 1)
         # enc_outs = torch.sum(enc_outs, dim=-1)#enc_outs =[batchsize,seq,embedding]->[batchsize,embedding]
         # return self.fc_out(enc_outs)
+
         return inputs_src
 class TransfomerDecoder(nn.Module):
     def __init__(self,config,embedding,embedding_size,pos_embedding,voc_size,ffn_dim=512):

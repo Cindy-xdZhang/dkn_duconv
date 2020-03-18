@@ -269,7 +269,7 @@ def dev(handler):
                 responses =pad_sequence(responses,batch_first=True, padding_value=0)
                 responses=responses.transpose(0,1)
                 if config.use_gpu and USE_CUDA: 
-                    history,knowledge= history.cuda() ,knowledge.cuda()
+                    history,knowledge,responses= history.cuda() ,knowledge.cuda(),responses.cuda()
                 #enc_outs =[batchsize,seq,embedding]
                 enc_output = encoder(history,knowledge)
                 #transformer decoder input 是之前生成的所有句子-》注意观察一下POSITION ENCODING 的移位情况

@@ -12,6 +12,7 @@ import re
 import os
 import json
 import collections
+import random
 """
 1. Dialogue Goal（goal）:
 It contains two or three lines: the first contains the given dialogue path i.e., 
@@ -68,7 +69,7 @@ def convert_session_to_sample(session_file, sample_file):
 # 1：tokenize最好到建立vocabulary时再用，text.txt中又泛化又tokenize，对话完全没意义了，因此目前的sample+泛化输出应该有数字
 # ，下一步建立词汇表的时候再tokenize。（其实好像也无所谓，DUCONV自己跑出来的就是没有实际数字的对话。。）
 #2.dkn 中泛化后文本不再以json形式存储，而是以一个长字符串加分隔符做全部数据。而我暂且保留了json格式，在json格式基础上实现泛化
-def data_preprocess(path_raw,text_file,topic_file,topic_generalization=True,test=False):
+def data_preprocess(path_raw,text_file,topic_file,topic_generalization=True,test=False,augment=True):
     # tokenize数字
     # tokenize<<xx>> 2020.0212
     # tokenize在sample、泛化后，在建立词汇表以前   2020.0202
@@ -99,7 +100,7 @@ def data_preprocess(path_raw,text_file,topic_file,topic_generalization=True,test
             tokens_list = [generize(t,value, key) for t in tokens]
             return tokens_list
     #采样和泛化topic
-    def sample2multi_generize_topic(path_raw,text_file,topic_file,topic_generalization=True):
+    def sample2multi_generize_topic(path_raw,text_file,topic_file):
         with open(path_raw, 'r', encoding='utf-8') as f:
             fout_text = open(text_file, 'w',encoding='utf-8')
             fout_topic = open(topic_file, 'w',encoding='utf-8')
@@ -146,7 +147,7 @@ def data_preprocess(path_raw,text_file,topic_file,topic_generalization=True,test
                                 sample["history"] =  tokenize(generize(sample["history"],value, key))
                                 sample["response"] =  tokenize(generize(sample["response"],value, key))
                                 # model_text = model_text.replace(value, key)     
-
+            
                         topic_dict = json.dumps(topic_dict, ensure_ascii=False)
                         model_text=json.dumps(sample, ensure_ascii=False)
                         fout_text.write(model_text + "\n")
@@ -197,7 +198,7 @@ def data_preprocess(path_raw,text_file,topic_file,topic_generalization=True,test
             fout_text.close()
             fout_topic.close()
 
-    sample2multi_generize_topic(path_raw,text_file,topic_file,topic_generalization)
+    sample2multi_generize_topic(path_raw,text_file,topic_file)
 
 
 if __name__ == "__main__":

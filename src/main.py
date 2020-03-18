@@ -32,7 +32,7 @@ def arg_config():
         print('--n_layers: '+str(config.n_layers))
         print('--attn: '+str(config.attn))
         print('--select_kg: '+str(config.select_kg))
-        print('--pre_train_embedding: '+str(config.pre_train_embedding))
+        print('--sha: '+str(config.pre_train_embedding))
         print('--shareW: '+str(config.shareW))
         if config.continue_training==" ":
             print('--continue_training(load model from checkpoint): NONE')
@@ -48,10 +48,10 @@ def arg_config():
     parser = argparse.ArgumentParser()
     # Network CMD参数组
     net_arg = parser.add_argument_group("Network")
-    net_arg.add_argument("-m","--model_type", type=str, default='trans',
+    net_arg.add_argument("-m","--model_type", type=str, default='gru',
                          choices=['trans', 'gru'])
     net_arg.add_argument('-hi',"--hidden_size", type=int, default=512)
-    net_arg.add_argument("--n_layers", type=int, default=6)
+    net_arg.add_argument("--n_layers", type=int, default=1)
     net_arg.add_argument("--attn", type=str, default='general',
                          choices=['none', 'concat', 'dot', 'general'])
     net_arg.add_argument("--dropout", type=float, default=0)
@@ -103,7 +103,7 @@ def build_models(voc,config,checkpoint):
         #embedding在encoder 和decoder外面因为他们共用embedding
         embedding_layer = nn.Embedding(voc_size, WORD_EMBEDDING_DIMs)
         if config.pre_train_embedding==True:embedding_layer.weight.data.copy_(torch.from_numpy(build_embedding(voc,config.voc_and_embedding_save_path)))
-        encoder = network.EncoderRNN(hidden_size, WORD_EMBEDDING_DIMs, embedding_layer, config.n_layers, config.dropout)
+        encoder = network.EncoderRNN_noKG(hidden_size, WORD_EMBEDDING_DIMs, embedding_layer, config.n_layers, config.dropout)
         attn_model = config.attn
         decoder = network.LuongAttnDecoderRNN(attn_model, embedding_layer,WORD_EMBEDDING_DIMs, hidden_size, voc_size,\
             config.n_layers, config.dropout)
@@ -314,7 +314,6 @@ def train_gru(config):
                 f.write(str)
         dev_handeler=(encoder,decoder,config,epoch_id)
         dev(dev_handeler)
-
 def trainIter_gru(train_handler):
     epoch,start_iteration,train_loader,encoder,decoder,encoder_optimizer,decoder_optimizer,config=train_handler
     stage_total_loss=0
@@ -381,7 +380,6 @@ def trainIter_gru(train_handler):
             save_checkpoint(save_handler)
         start_iteration+=1
     return len(train_loader),epoch_loss_avg/len(train_loader)
-
 
 if __name__ == "__main__":
     #配置解析CMD 参数
