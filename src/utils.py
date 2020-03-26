@@ -14,6 +14,7 @@ import numpy as np
 import torch 
 from torch import load,save
 from torch.nn.utils.rnn import pad_sequence
+from sklearn.decomposition import PCA
 #Vocabulary中的token标号
 PAD_token = 0
 SOS_token = 1
@@ -22,7 +23,7 @@ EOS_token = 2
 #average # utterances per dialog	9.1
 #average # words per utterance	10.6
 MAX_TITLE_LENGTH=20
-WORD_EMBEDDING_DIM=300
+WORD_EMBEDDING_DIM=20
 
 class Vocabulary:
     def __init__(self, name="None"):
@@ -36,7 +37,7 @@ class Vocabulary:
             self.addWord(word)
 
     def addWord(self, word):
-        if word not in self.word2index:
+        if word not in self.word2index and word != '':
             self.word2index[word] = self.n_words
             # self.word2count[word] = 1
             self.index2word[self.n_words] = word
@@ -57,9 +58,11 @@ class Vocabulary:
                 res=""
                 for sentense in str_in:
                     res=res+"SOS "+sentense+' EOS '
-                mx_length=len(res.split(" "))
-                res=self.encoding_sentence(res,max_length=mx_length-1)
-                return res
+                item_cp=[]
+                for point in res.split(" "):
+                    if point !="":
+                        item_cp.append(self.word2index[point]) 
+                return item_cp
             else:
                 str_in.append(1)
                 str_in.append(2)
@@ -68,9 +71,12 @@ class Vocabulary:
             #history
             item["history"]=merge_history(item["history"])
             #response
-            item["response"]="SOS "+item["response"]
-            response_length=len(item["response"].split(" "))
-            item["response"]=self.encoding_sentence(item["response"],max_length=response_length+1)
+            item["response"]="SOS "+item["response"]+" EOS"
+            item_cp=[]
+            for point in item["response"].split(" "):
+                if point !="":
+                    item_cp.append(self.word2index[point])
+            item["response"]  =  item_cp    
             #kg
             kg=' PAD '.join([' '.join(spo) for spo in item["knowledge"]])
             length=len(kg.split())
@@ -208,11 +214,9 @@ def word_index(train_data,voc_save_dir):
         print("-Counted words in conversations and knowledges:", voc.n_words)
         if  os.path.exists(voc_save_dir)==False:os.mkdir(voc_save_dir)
         save(voc,voc_save_path)
-        print("-building voc finish.")
     else:
         print("-Loading voc from file....")
         voc=load(voc_save_path)
-        print("-Loading voc from file finish.")
     return voc
 #entity_index(Uniq_ID)
 def entity_index(train_data):
@@ -229,9 +233,14 @@ def _check_KnowledgeList_and_Vocabulary_implementation():
     # path_sample=os.path.join("data","duconv","sample.train.txt")
     #convert_session_to_sample(path_raw,path_sample)
     path_sample2=os.path.join("dkn_duconv","duconv_data","text.train.txt")
+    text_path2=os.path.join("dkn_duconv","duconv_data","text.test.txt")
+    text_path3=os.path.join("dkn_duconv","duconv_data","text.dev.txt")
     # data_preprocess(path_sample,path_sample2,path_sample3)
-    train_data=parse_json_txtfile(path_sample2)     
-    voc=word_index(train_data,"./dkn_duconv")
+    train_data=parse_json_txtfile(path_sample2)  
+    dev_data=parse_json_txtfile(text_path2)
+    test_data=parse_json_txtfile(text_path3)  
+    all_data=train_data+dev_data+test_data 
+    voc=word_index(all_data,"./dkn_duconv")
     
     build_embedding(voc)
 
@@ -255,38 +264,66 @@ def _check_KnowledgeList_and_Vocabulary_implementation():
     #     print(int_conv)
     #     recover_conv= voc.idx2sentence(int_conv)  
     #     print(recover_conv)
+def PCA_embedding(path_in,path_out):
+    path_sample2=os.path.join("dkn_duconv","duconv_data","text.train.txt")
+    text_path2=os.path.join("dkn_duconv","duconv_data","text.test.txt")
+    text_path3=os.path.join("dkn_duconv","duconv_data","text.dev.txt")
+    train_data=parse_json_txtfile(path_sample2)  
+    dev_data=parse_json_txtfile(text_path2)
+    test_data=parse_json_txtfile(text_path3)  
+    all_data=train_data+dev_data+test_data 
+    voc=word_index(all_data,"./dkn_duconv")
+    Words=[]
+    vecs=[]
+    with open(path_in, 'r', encoding='utf-8') as f:
+        # embeded_words=0
+        word2index=voc.word2index
+        for i, line in enumerate(f):
+            if i==0:continue
+            word,vec=(line.strip()).split(" ", 1)
+            if word in word2index.keys():
+                Words.append(word)
+                num_vec= np.array([float(item) for item in vec.split()])
+                vecs.append(num_vec)
+        f.close()
+    pca = PCA(n_components=WORD_EMBEDDING_DIM)   #降到2维
+    pca.fit(vecs)
+    newX=pca.fit_transform(vecs)
+    with open(path_out,'w',encoding='utf-8') as f:
+        for idx,word in enumerate(Words):
+            newp=[str(num) for num in newX[idx]]
+            str_vec=" ".join(newp)
+            template=str(word)+"\t"+str_vec+"\n"
+            f.write(template)
+        f.close()
 def build_embedding(Vocabulary=None,voc_embedding_save_dir="dkn_duconv"):
     def load_pretrain_SGNS(embeddings):
-        with open("dkn_duconv/sgns.wiki.word.txt", 'r', encoding='utf-8') as f:
-            embeded_words=0
-            word2index=Vocabulary.word2index
+        embeddings_file="dkn_duconv/sgns.wiki_pca.txt"
+        embeded_words=0
+        word2index=Vocabulary.word2index
+        with open(embeddings_file, 'r', encoding='utf-8') as f:
             for i, line in enumerate(f):
-                # if i==1:continue
-                word,vec=(line.strip()).split(" ", 1)
+                word,vec=(line.strip()).split("\t", 1)
                 if word in word2index.keys():
                     num_vec= np.array([float(item) for item in vec.split()])
                     embeddings[word2index[word]]=num_vec
                     embeded_words+=1
-            f.close()
-            print("Using sgns Word2Vec："+str(float(embeded_words/Vocabulary.n_words)*100)+ "% words are embedded.")
+        print("Using sgns Word2Vec："+str(float(embeded_words/Vocabulary.n_words)*100)+ "% words are embedded.")
     if Vocabulary==None:raise Exception("No vocabulary information available!")
     else:
         voc_embedding_save_path=os.path.join(voc_embedding_save_dir, '{!s}.npy'.format('duconv_voc_embedding_'+str(Vocabulary.n_words)+"_"+str(WORD_EMBEDDING_DIM)))
         if os.path.exists(voc_embedding_save_path)==False:
             word2index=Vocabulary.word2index
             print('-getting word embeddings of '+ str(Vocabulary.n_words)  +' words from pretrain model...')
-            corpus=list(word2index.keys())
             embeddings = np.ones([len(word2index) , WORD_EMBEDDING_DIM],dtype=float)
             load_pretrain_SGNS(embeddings)
             print('- writing word embeddings ...')
             if  os.path.exists(voc_embedding_save_dir)==False:os.mkdir(voc_embedding_save_dir)
-            np.save(voc_embedding_save_path, embeddings)
-            print('- writing word embeddings finish.')
+            # np.save(voc_embedding_save_path, embeddings)
             return embeddings
         elif os.path.exists(voc_embedding_save_path)==True:
             print('-load word embeddings ...')
             embeddings=np.array(np.load(voc_embedding_save_path))
-            print('-load word embeddings finish.')
             return embeddings
         else:
             raise Exception("Unknown Exception when build_embedding !")
@@ -322,9 +359,8 @@ def collate_fn(batch):
         'knowledge': knowledge,
         'response': response,
     }
-    
-
 def get_infinite_batches(self, data_loader):
         while True:
             for i, (images, _) in enumerate(data_loader):
                 yield images    
+_check_KnowledgeList_and_Vocabulary_implementation()

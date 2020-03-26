@@ -11,7 +11,7 @@ class ScheduledOptim():
 
     def __init__(self, optimizer, init_lr, d_model, n_warmup_steps):
         self._optimizer = optimizer
-        self.init_lr = init_lr*10000
+        self.init_lr = init_lr
         self.d_model = d_model
         self.n_warmup_steps = n_warmup_steps
         self.n_steps = 0
@@ -34,8 +34,9 @@ class ScheduledOptim():
     def _get_lr_scale(self):
         d_model = self.d_model
         n_steps, n_warmup_steps = self.n_steps, self.n_warmup_steps
-        chs= min(n_steps ** (-0.5), n_steps * n_warmup_steps ** (-1.5))
-        #n<n_warmup_steps**(-1.5) 取 n_steps * n_warmup_steps ** (-1.5)~3.952847075210474e-06
+        chs= min(n_steps ** (-0.5), n_steps * (n_warmup_steps ** (-1.5)) )
+        #n<n_warmup_steps 取 n_steps * (n_warmup_steps ** (-1.5))~3.952847075210474e-06
+        #n>n_warmup_steps 取n_steps ** (-0.5)~1e-2
         dms=(d_model ** -0.5) 
         return dms*chs
 

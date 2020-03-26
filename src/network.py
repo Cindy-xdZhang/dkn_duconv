@@ -21,11 +21,14 @@ class EncoderRNN_noKG(nn.Module):
         self.embedding = embedding
         self.gru_History = nn.GRU(embedding_size, hidden_size, n_layers,
                         dropout=(0 if n_layers == 1 else dropout), bidirectional=True,batch_first =False)
-        #GRU的 output: (seq_len, batch, hidden*n_dir) ,
+        torch.nn.init.orthogonal_( self.gru_History.weight_hh_l0)
+        torch.nn.init.orthogonal_( self.gru_History.weight_hh_l0_reverse)
+        torch.nn.init.orthogonal_( self.gru_History.weight_ih_l0)
+        torch.nn.init.orthogonal_( self.gru_History.weight_ih_l0_reverse)
         # hidden_kg=( num_layers * num_directions, batch,hidden_size)
         # batch first 只影响output 不影响hidden的形状 所以batch first=false格式更统一
-        self.W1=torch.nn.Linear(self.hidden_size*2, self.hidden_size, bias=True)
-        self.PReLU1=torch.nn.PReLU()
+        # self.W1=torch.nn.Linear(self.hidden_size*2, self.hidden_size, bias=True)
+        # self.PReLU1=torch.nn.PReLU()
 
     def forward(self, input_history_seq,input_history_lengths,input_kg_seq,input_kg_lengths, unsort_idxs):
         unsort_idx_history,unsort_idx_kg=unsort_idxs
@@ -35,6 +38,7 @@ class EncoderRNN_noKG(nn.Module):
         his_outputs, hidden_his= self.gru_History(input_history_seq_packed, None)
         his_outputs, _ = torch.nn.utils.rnn.pad_packed_sequence(his_outputs,batch_first=False)
         his_outputs=his_outputs.index_select(1,unsort_idx_history)
+        hidden_his=hidden_his.index_select(1,unsort_idx_history)
         his_outputs = his_outputs[:, :, :self.hidden_size] + his_outputs[:, : ,self.hidden_size:] # Sum bidirectional outputs (batch, 1, hidden)
         return his_outputs, hidden_his
 class EncoderRNN(nn.Module):
@@ -48,13 +52,21 @@ class EncoderRNN(nn.Module):
                         dropout=(0 if n_layers == 1 else dropout), bidirectional=True,batch_first =False)
         self.gru_History = nn.GRU(embedding_size, hidden_size, n_layers,
                         dropout=(0 if n_layers == 1 else dropout), bidirectional=True,batch_first =False)
+        torch.nn.init.orthogonal_( self.gru_KG.weight_hh_l0)
+        torch.nn.init.orthogonal_( self.gru_KG.weight_hh_l0_reverse)
+        torch.nn.init.orthogonal_( self.gru_KG.weight_ih_l0)
+        torch.nn.init.orthogonal_( self.gru_KG.weight_ih_l0_reverse)
+        torch.nn.init.orthogonal_( self.gru_History.weight_hh_l0)
+        torch.nn.init.orthogonal_( self.gru_History.weight_hh_l0_reverse)
+        torch.nn.init.orthogonal_( self.gru_History.weight_ih_l0)
+        torch.nn.init.orthogonal_( self.gru_History.weight_ih_l0_reverse)
         #GRU的 output: (seq_len, batch, hidden*n_dir) ,
         # hidden_kg=( num_layers * num_directions, batch,hidden_size)
         # batch first 只影响output 不影响hidden的形状 所以batch first=false格式更统一
         self.W1=torch.nn.Linear(self.hidden_size*2, self.hidden_size, bias=True)
         self.W2=torch.nn.Linear(self.hidden_size, self.hidden_size, bias=True)
-        self.PReLU1=torch.nn.PReLU()
-        self.PReLU2=torch.nn.PReLU()
+        # self.PReLU1=torch.nn.PReLU()
+        # self.PReLU2=torch.nn.PReLU()
 
     def forward(self, input_history_seq,input_history_lengths,input_kg_seq,input_kg_lengths, unsort_idxs):
         unsort_idx_history,unsort_idx_kg=unsort_idxs
@@ -68,18 +80,21 @@ class EncoderRNN(nn.Module):
         kg_outputs,hidden_kg=self.gru_KG(input_kg_seq_packed, None) 
         kg_outputs, _ = torch.nn.utils.rnn.pad_packed_sequence(kg_outputs,batch_first=False )
         kg_outputs=kg_outputs.index_select(1,unsort_idx_kg)
+        hidden_kg=hidden_kg.index_select(1,unsort_idx_kg)
         kg_outputs = kg_outputs[:, :, :self.hidden_size] + kg_outputs[:, : ,self.hidden_size:] # Sum bidirectional outputs ( batch,1, hidden)
+        
         #history
         input_history_seq_embedded = self.embedding(input_history_seq)
         input_history_seq_packed = torch.nn.utils.rnn.pack_padded_sequence(input_history_seq_embedded, input_history_lengths,batch_first=False)
         his_outputs, hidden_his= self.gru_History(input_history_seq_packed, None)
         his_outputs, _ = torch.nn.utils.rnn.pad_packed_sequence(his_outputs,batch_first=False)
         his_outputs=his_outputs.index_select(1,unsort_idx_history)
+        hidden_his=hidden_his.index_select(1,unsort_idx_history)
         his_outputs = his_outputs[:, :, :self.hidden_size] + his_outputs[:, : ,self.hidden_size:] # Sum bidirectional outputs (batch, 1, hidden)
         # hidden_kg=(num_layers * num_directions,batch,  hidden_size)
         concat_hidden=torch.cat((hidden_his, hidden_kg),1).reshape(self.n_layers*2,-1, self.hidden_size*2)
-        hidden=self.PReLU1(self.W1(concat_hidden))
-        outputs=self.PReLU2(self.W2(torch.cat((his_outputs, kg_outputs), 0)))
+        hidden=self.W1(concat_hidden)
+        outputs=self.W2(torch.cat((his_outputs, kg_outputs), 0))
         return outputs, hidden
 class Attn(nn.Module):
     def __init__(self, method, hidden_size):
@@ -194,12 +209,11 @@ class PositionalEncoding(nn.Module):
         # TODO: make it with torch instead of numpy
 
         def get_position_angle_vec(position):
-            return [position / np.power(10000, (2 * hid_j  / d_hid)) for hid_j in range(d_hid)]
+            return [position / np.power(10000, 2.0 *(hid_j //2) / d_hid  ) for hid_j in range(d_hid)]
 
         sinusoid_table = np.array([get_position_angle_vec(pos_i) for pos_i in range(n_position)])
         sinusoid_table[:, 0::2] = np.sin(sinusoid_table[:, 0::2])  # dim 2i
         sinusoid_table[:, 1::2] = np.cos(sinusoid_table[:, 1::2])  # dim 2i+1
-
         return torch.FloatTensor(sinusoid_table).unsqueeze(0)
 
     def forward(self, x):
@@ -223,8 +237,8 @@ class TransfomerEncoder(nn.Module):
             shareweight=[self.mh_w_qs1,self.mh_w_vs1,self.mh_w_qs2,self.mh_w_vs2]
             for ly in shareweight:
                 nn.init.normal_(ly.weight, mean=0, std=np.sqrt(2.0 / (embedding_size + d_k)))
-            nn.init.kaiming_normal_(self.mh_w_fc2.weight)
-            nn.init.kaiming_normal_(self.mh_w_fc1.weight)
+            nn.init.xavier_normal(self.mh_w_fc2.weight)
+            nn.init.xavier_normal(self.mh_w_fc1.weight)
         else:
             self.mh_w_qs1=None
             self.mh_w_vs1=None
@@ -253,11 +267,13 @@ class TransfomerEncoder(nn.Module):
 
     def forward(self, char_his, kg):
         #history_embedded=[batchsize, seq=~106,embeddingsize=300]
+        enc_self_attn_mask=padding_mask(char_his).to(Global_device)
         history_embedded= (self.pos_embedding(self.char_embedding(char_his)))
         #kg_embed=[batchsize, seq=~103,embeddingsize=300]
         #kg_embed=(self.pos_embedding(self.char_embedding(kg)))
+
         for layer in self.layer_stack_kg:
-            history_embedded, _ = layer(history_embedded)
+            history_embedded, _ = layer(history_embedded,slf_attn_mask=enc_self_attn_mask)
         # if self.Ws_kg !=None:
         #     info_embed=torch.cat((kg_embed,history_embedded),1)
         #     info_embed = info_embed.transpose(1, 2)
@@ -291,8 +307,8 @@ class TransfomerDecoder(nn.Module):
             shareweight=[self.mh_w_qs1,self.mh_w_vs1,self.mh_w_qs2,self.mh_w_vs2]
             for ly in shareweight:
                 nn.init.normal_(ly.weight, mean=0, std=np.sqrt(2.0 / (embedding_size + d_k)))
-            nn.init.kaiming_normal_(self.mh_w_fc2.weight)
-            nn.init.kaiming_normal_(self.mh_w_fc1.weight)
+            nn.init.xavier_normal(self.mh_w_fc2.weight)
+            nn.init.xavier_normal(self.mh_w_fc1.weight)
         else:
             self.mh_w_qs1=None
             self.mh_w_vs1=None
@@ -306,7 +322,7 @@ class TransfomerDecoder(nn.Module):
         self.final_transformer_linear = nn.Linear(embedding_size, voc_size, bias=False)
         self.final_transformer_softmax = nn.Softmax(dim=2)
 
-    def forward(self, decoder_inputs, enc_output, context_attn_mask=None):
+    def forward(self, decoder_inputs, enc_output,dec_enc_attn_pad_mask=None):
         #enc_output[B L E]
         #output:[B L E]
         output=self.pos_embedding(self.seq_embedding(decoder_inputs))
@@ -316,13 +332,13 @@ class TransfomerDecoder(nn.Module):
         seq_mask = sequence_mask(decoder_inputs).to(Global_device)
         #self_attn_mask=[B,L,L]
         self_attn_mask = (torch.gt((self_attention_padding_mask.float() + seq_mask.float()), 0)).float()
-        self_attentions = []
-        context_attentions = []
+        # self_attentions = []
+        # context_attentions = []
         for decoder in self.decoder_layers:
             output, self_attn, context_attn = decoder(
-            output, enc_output, self_attn_mask, context_attn_mask)
-            self_attentions.append(self_attn)
-            context_attentions.append(context_attn)
+            output, enc_output, self_attn_mask, dec_enc_attn_pad_mask)
+            # self_attentions.append(self_attn)
+            # context_attentions.append(context_attn)
         
         #transformer forward:
         #context_attn_mask = padding_mask(tgt_seq, src_seq)
@@ -333,5 +349,5 @@ class TransfomerDecoder(nn.Module):
         # return output, enc_self_attn, dec_self_attn, ctx_attn
         output = self.final_transformer_linear(output)
         output = self.final_transformer_softmax(output)
-
-        return output, self_attentions, context_attentions
+        return output.view(-1, output.size(-1))
+        # return output, self_attentions, context_attentions

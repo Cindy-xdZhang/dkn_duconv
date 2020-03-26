@@ -31,7 +31,7 @@ class My_dataset(Dataset):
     def build_corpus_data(self,voc_save_path):
         text_path1=os.path.join(self.dir,"text."+"train"+".txt")
         text_path2=os.path.join(self.dir,"text."+"dev"+".txt")
-        text_path3=os.path.join(self.dir,"text."+"test"+".txt")
+        text_path3=os.path.join(self.dir,"text."+"test"+".txt") 
         train_data=parse_json_txtfile(text_path1)
         dev_data=parse_json_txtfile(text_path2)
         test_data=parse_json_txtfile(text_path3)
@@ -70,8 +70,9 @@ v0.0.1:
 输入数据均为变长数据-》交给torch.padsequence等后续padding
 
 """
-
-
+# x=My_dataset()
+# for i in range(10):
+#     print(x[i])
 #以下代码测试torch.nn.utils.rnn.pack_padded_sequence表明变成序列不能长度为0
 # RuntimeError: Length of all samples has to be greater than 0, but found an element in 'lengths' that is <= 0
 # from torch.nn.utils.rnn import pad_sequence,pack_padded_sequence

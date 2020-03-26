@@ -17,6 +17,7 @@ from data_loader import My_dataset
 from torch.utils.data import DataLoader
 from evaluate import *
 from main import build_models 
+from transformer_sublayers import  get_attn_pad_mask
 USE_CUDA = torch.cuda.is_available() 
 class Sentence:
     def __init__(self, decoder_hidden, last_idx=SOS_token, sentence_idxes=[], sentence_scores=[]):
@@ -108,10 +109,20 @@ def topic_materialization(inputs_sentenses,data_dir,output_file_dir):
 def eval(result_file, sample_file, eval_file):
     convert_result_for_eval(sample_file, result_file, eval_file)
     sents = []
-    for line in open(eval_file):
+    F1=0.0
+    BLEU1=0.0
+    BLEU2=0.0
+    DISTINCT1=0.0
+    DISTINCT2=0.0
+    count=0
+    tks=[]
+    for line in open(eval_file,'r',encoding="utf-8"):
         tk = line.strip().split("\t")
         if len(tk) < 2:
             continue
+        tks.append(tk)
+    for tk in tks: 
+        count+=1
         pred_tokens = tk[0].strip().split(" ")
         gold_tokens = tk[1].strip().split(" ")
         sents.append([pred_tokens, gold_tokens])
@@ -121,13 +132,19 @@ def eval(result_file, sample_file, eval_file):
         bleu1, bleu2 = calc_bleu(sents)
         # calc distinct
         distinct1, distinct2 = calc_distinct(sents)
-
-        output_str = "F1: %.2f%%\n" % (f1 * 100)
-        output_str += "BLEU1: %.3f%%\n" % bleu1
-        output_str += "BLEU2: %.3f%%\n" % bleu2
-        output_str += "DISTINCT1: %.3f%%\n" % distinct1
-        output_str += "DISTINCT2: %.3f%%\n" % distinct2
-        print(output_str)
+        F1+=f1
+        BLEU1+=bleu1
+        BLEU2+=bleu2
+        DISTINCT1+=distinct1
+        DISTINCT2+=distinct2
+        print("testing: "+str(count)+"/"+str(len(tks)))
+    F1,BLEU1,BLEU2,DISTINCT1,DISTINCT2= F1/count,BLEU1/count,BLEU2/count,DISTINCT1/count,DISTINCT2/count
+    output_str = "F1: %.2f%%\n" % (F1 * 100)
+    output_str += "BLEU1: %.3f%%\n" % BLEU1
+    output_str += "BLEU2: %.3f%%\n" % BLEU2
+    output_str += "DISTINCT1: %.3f%%\n" % DISTINCT1
+    output_str += "DISTINCT2: %.3f%%\n" % DISTINCT2
+    print(output_str)           
 def test_model(config):
     print('-Test:loading dataset...')
     pre_check_path=os.path.join(config.data_dir,"pre_check.txt")
@@ -143,6 +160,8 @@ def test_model(config):
     else:
         raise Exception("No model exception when test model !")
     encoder,decoder=build_models(DuConv_test_DataSet.voc,config,checkpoint)
+    encoder.eval()
+    decoder.eval()
     print('-Initializing test process...')
     total_loss=0
     batch_size=config.batch_size
@@ -153,6 +172,7 @@ def test_model(config):
             for batch_idx, data in enumerate(test_loader):
                 print("testing: ",batch_idx,"/",len(test_loader)," ...")
                 history,knowledge,responses=data["history"],data["knowledge"],data["response"]
+                preck_history=history[0].numpy().tolist()
                 history,len_history,idx_unsort1 = padding_sort_transform(history)
                 knowledge,len_knowledge,idx_unsort2 = padding_sort_transform(knowledge)
                 responses,len_response,idx_unsort3 = padding_sort_transform(responses)
@@ -167,12 +187,14 @@ def test_model(config):
                 output_sentence = ' '.join(output_words)
                 output_sentences.append(output_sentence)
                 with open(pre_check_path,'a',encoding='utf-8') as f:
-                    template='Re:\t'+output_sentence+"\n"
+                    preck_history=" ".join([DuConv_test_DataSet.voc.index2word[it] for it in preck_history])
+                    template="his: "+preck_history+' Re: '+output_sentence+"\n"
                     f.write(template)
         elif config.model_type=="trans":
             for batch_idx, data in enumerate(test_loader):
                 print("testing: ",batch_idx,"/",len(test_loader)," ...")
                 history,knowledge,responses=data["history"],data["knowledge"],data["response"]
+                preck_history=history[0].numpy().tolist()
                 history = pad_sequence(history,batch_first=True, padding_value=0)
                 knowledge = pad_sequence(knowledge,batch_first=True, padding_value=0)
                 len_respons=[len(it) for it in responses]
@@ -199,17 +221,20 @@ def test_model(config):
                 decoder_input_str=[voc.index2word[x] for x in decoder_input]
                 output_sentence = ' '.join(decoder_input_str)
                 with open(pre_check_path,'a',encoding='utf-8') as f:
-                    template='Re:\t'+output_sentence+"\n"
-                    str=template
-                    f.write(str)
+                    preck_history=" ".join([DuConv_test_DataSet.voc.index2word[it] for it in preck_history])
+                    template="his: "+preck_history+' Re: '+output_sentence+"\n"
+                    f.write(template)
                 output_sentences.append(output_sentence)
-
+    # 用topic_file=os.path.join(data_dir,"topic.test.txt")生成result_file=os.path.join(output_path,"result.txt)
     topic_materialization(output_sentences,config.data_dir,config.output_path)
-    text_path=os.path.join(config.data_dir,"text.test_reduce.txt")
+    text_path=os.path.join(config.data_dir,"text.test.txt")
     eval_path=os.path.join(config.data_dir,"result_eval.txt")
+    #result_file+text.test.txt
     eval(config.output_path,text_path,eval_path)
 def dev(handler):
     encoder,decoder,config,epoch,voc,dev_loader=handler
+    encoder.eval()
+    decoder.eval()
     total_loss=0
     batch_size=config.batch_size
     output_sentences=[]
@@ -257,30 +282,17 @@ def dev(handler):
             epoch_loss_avg=0
             for batch_idx, data in enumerate(dev_loader):
                 history,knowledge,responses=data["history"],data["knowledge"],data["response"]
-                history = pad_sequence(history,batch_first=True, padding_value=0)
-                knowledge = pad_sequence(knowledge,batch_first=True, padding_value=0)
-                len_respons=[len(it) for it in responses]
-                len_respons.sort()
-                MAX_RESPONSE_LENGTH=len_respons[-1]-1
-                responses =pad_sequence(responses,batch_first=True, padding_value=0)
-                responses=responses.transpose(0,1)
-                if config.use_gpu and USE_CUDA: 
-                    history,knowledge,responses= history.cuda() ,knowledge.cuda(),responses.cuda()
+                history = pad_sequence(history,batch_first=True, padding_value=0).to(network.Global_device)
+                knowledge = pad_sequence(knowledge,batch_first=True, padding_value=0).to(network.Global_device)
+                MAX_RESPONSE_LENGTH=max([len(it) for it in responses])-1
+                responses =pad_sequence(responses,batch_first=True, padding_value=0).to(network.Global_device)
+                decoder_input =responses[:,:-1].to(network.Global_device)
+                decoder_target =responses[:,1:].to(network.Global_device)
                 #enc_outs =[batchsize,seq,embedding]
                 enc_output = encoder(history,knowledge)
-                #transformer decoder input 是之前生成的所有句子-》注意观察一下POSITION ENCODING 的移位情况
-                decoder_input = torch.LongTensor([SOS_token for _ in range(batch_size)]).reshape(batch_size,1) #[batch_size,1]
-                decoder_input = decoder_input.to(network.Global_device)
-                loss=0
-                for t in range(MAX_RESPONSE_LENGTH):
-                    decoder_input = decoder_input.to(network.Global_device)
-                    decoder_output, self_attentions, context_attentions = decoder( decoder_input, enc_output )
-                    #TODO:我用的选最后一个加squeeze. [b,l,dim]原文中又是如何变成[b,dim]的？
-                    decoder_output=decoder_output[:,-1,:].squeeze(1)
-                    #topi为概率最大词汇的下标shape=[batch_Size=1,1]
-                    _, topi = decoder_output.topk(1) # [batch_Size=1, 1]
-                    decoder_input=torch.cat((decoder_input,topi),1)
-                    loss += F.cross_entropy(decoder_output, responses[t+1], ignore_index=PAD_token)
+                dec_enc_attn_pad_mask =get_attn_pad_mask(decoder_input, history).to(network.Global_device)
+                decoder_output= decoder( decoder_input, enc_output ,dec_enc_attn_pad_mask)
+                loss = F.cross_entropy(decoder_output, decoder_target.contiguous().view(-1), ignore_index=PAD_token)
                 epoch_loss_avg+=loss.cpu().item() 
             epoch_loss_avg/=len(dev_loader)
             print('Evaluate Epoch: {}\t avg Loss: {:.6f}\ttime: {}'.format(
@@ -290,3 +302,21 @@ def dev(handler):
                 str=template.format(epoch,epoch_loss_avg,\
                     time.asctime(time.localtime(time.time())))
                 f.write(str)
+
+def dummy_result(resultfile,textfile,dummyfile):
+    ress=[]
+    for line in open(resultfile,encoding='utf-8'):
+        res = line.strip().split("\t")
+        ress.append(res[0])
+    testdata=parse_json_txtfile(textfile)
+    assert len(testdata)==len(ress)
+    with open(dummyfile,'w',encoding='utf-8') as f:
+            for idx,res in enumerate(ress):
+                his=" ".join(testdata[idx]['history'])
+                template="his: "+his+' std: '+testdata[idx]['response']+' Re: '+res+"\n"
+                f.write(template)
+# dummy_result("dkn_duconv\\output\\test.result.final","dkn_duconv\\duconv_data\\test_1.txt","dkn_duconv\\output\\dummy_result_std.txt")
+# data_dir="dkn_duconv\\duconv_data"
+# text_path=os.path.join(data_dir,"text.test.txt")
+# eval_path=os.path.join(data_dir,"result_eval.txt")
+# eval("dkn_duconv\\output\\result.txt",text_path,eval_path)

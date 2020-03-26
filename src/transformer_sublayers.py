@@ -9,8 +9,6 @@ import torch
 import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
-def residual(sublayer_fn,x):
-	return sublayer_fn(x)+x
 def padding_mask(seq_q):
 	# seq_q的形状是[B,L]
     # padding_mask 为shape [B, L, L],seq_q为0（pad)的地方x则对应的[Bi,:,x]为1
@@ -43,6 +41,12 @@ def sequence_mask(seq):
                     diagonal=1)
     mask = mask.unsqueeze(0).expand(batch_size, -1, -1)  # [B, L, L]
     return mask
+def get_attn_pad_mask(seq_q, seq_k):
+    assert seq_q.dim() == 2 and seq_k.dim() == 2
+    b_size, len_q = seq_q.size()
+    b_size, len_k = seq_k.size()
+    pad_attn_mask = seq_k.data.eq(0).unsqueeze(1)  # b_size x 1 x len_k
+    return pad_attn_mask.expand(b_size, len_q, len_k)  # b_size x len_q x len_k
 class ScaledDotProductAttention(nn.Module):
     ''' Scaled Dot-Product Attention '''
     def __init__(self, temperature, attn_dropout=0.0):
@@ -55,7 +59,7 @@ class ScaledDotProductAttention(nn.Module):
         attn = torch.matmul(q / self.temperature, k.transpose(2, 3))
 
         if mask is not None:
-            attn = attn.masked_fill(mask == 0, -1e9)
+            attn = attn.masked_fill(mask == 1, -1e9)#mask==0??
 
         attn = self.dropout(F.softmax(attn, dim=-1))
         output = torch.matmul(attn, v)
@@ -126,7 +130,7 @@ class MultiHeadAttention(nn.Module):
         if mh_w_fc!=None:self.fc=mh_w_fc
         else:
             self.fc = nn.Linear(n_head * d_v, d_model)
-            nn.init.kaiming_normal_(self.fc.weight)
+            nn.init.xavier_normal(self.fc.weight)
 
         self.dropout = nn.Dropout(dropout)
 
@@ -157,7 +161,7 @@ class MultiHeadAttention(nn.Module):
         if mask is not None:
             mask = mask.unsqueeze(1)   # For head axis broadcasting.
         #
-        output, attn = self.attention(q, k, v, mask=None)
+        output, attn = self.attention(q, k, v, mask=mask)
         # (n_heads * batch_size) * lq * dv
         output = output.view(n_head, sz_b, len_q, d_v)
         # batch_size * len_q * (n_heads * dv)

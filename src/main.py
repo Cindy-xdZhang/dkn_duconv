@@ -17,10 +17,11 @@ import time
 from utils import *
 import network 
 from optimiser import ScheduledOptim
+from transformer_sublayers import  get_attn_pad_mask
 USE_CUDA = torch.cuda.is_available() 
 torch.backends.cudnn.enabled = True
 torch.backends.cudnn.benchmark = True
-WORD_EMBEDDING_DIM_NO_PRETRAIN=30
+WORD_EMBEDDING_DIM_NO_PRETRAIN=20
 def arg_config():
     def print_config_information(config):
         print('======================model===============================')
@@ -50,7 +51,7 @@ def arg_config():
     net_arg = parser.add_argument_group("Network")
     net_arg.add_argument("-m","--model_type", type=str, default='gru',
                          choices=['trans', 'gru'])
-    net_arg.add_argument('-hi',"--hidden_size", type=int, default=256)
+    net_arg.add_argument('-hi',"--hidden_size", type=int, default=128)
     net_arg.add_argument("--n_layers", type=int, default=1)
     net_arg.add_argument("--attn", type=str, default='general',
                          choices=['none', 'concat', 'dot', 'general'])
@@ -60,16 +61,16 @@ def arg_config():
     net_arg.add_argument("--n_heads", type=int, default=8)
     net_arg.add_argument("--shareW", type=str2bool, default=False)
     net_arg.add_argument('-sk', "--select_kg", type=str2bool, default=True)
-    net_arg.add_argument('-pre', "--pre_train_embedding", type=str2bool, default=False)
+    net_arg.add_argument('-pre', "--pre_train_embedding", type=str2bool, default=True)
 
     # Training / Testing CMD参数组
     train_arg = parser.add_argument_group("Training")
-    train_arg.add_argument("--n_warmup_steps", type=int, default=4000)
-    train_arg.add_argument('-bs',"--batch_size", type=int, default=2)
+    train_arg.add_argument("--n_warmup_steps", type=int, default=100)
+    train_arg.add_argument('-bs',"--batch_size", type=int, default=8)
     train_arg.add_argument('-r',"--run_type", type=str, default="train",
      choices=['train', 'test'])
-    train_arg.add_argument('-lr',"--lr", type=float, default=0.0005)
-    train_arg.add_argument("--end_epoch", type=int, default=50)
+    train_arg.add_argument('-lr',"--lr", type=float, default=0.001)
+    train_arg.add_argument("--end_epoch", type=int, default=80)
     gen_arg = parser.add_argument_group("Generation")
     gen_arg.add_argument("--beam_size", type=int, default=3)
     gen_arg.add_argument("--max_dec_len", type=int, default=25,\
@@ -79,14 +80,14 @@ def arg_config():
     misc_arg.add_argument('-u', "--use_gpu", type=str2bool, default=True)
     misc_arg.add_argument("--multi_gpu", type=str2bool, default=False)
     misc_arg.add_argument('-p',"--log_steps", type=int, default=10)
-    misc_arg.add_argument('-s',"--save_iteration", type=int, default=100,help='Every save_iteration iteration(s) save checkpoint model ')   
+    misc_arg.add_argument('-s',"--save_iteration", type=int, default=4000,help='Every save_iteration iteration(s) save checkpoint model ')   
     #路径参数
     misc_arg.add_argument('-i',"--data_dir", type=str,  default="C:\\Users\\10718\\PycharmProjects\\dkn_duconv\\duconv_data",\
         help="The input text data path.")
     misc_arg.add_argument("--voc_and_embedding_save_path", type=str,  default="dkn_duconv",help="The path for voc and embedding file.")
     misc_arg.add_argument("--output_path", type=str, default="dkn_duconv/output/")
     misc_arg.add_argument("--save_model_path", type=str, default="dkn_duconv/models")
-    misc_arg.add_argument('-con',"--continue_training", type=str, default="dkn_duconv\\models\\gru\L1_H256_general\\Epo_05_iter_000100.tar")
+    misc_arg.add_argument('-con',"--continue_training", type=str, default=" ")
     misc_arg.add_argument('-log',"--logfile_path", type=str, default="./log.txt")
     config = parser.parse_args()
     print_config_information(config)
@@ -101,18 +102,18 @@ def build_models(voc,config,checkpoint):
     WORD_EMBEDDING_DIMs=WORD_EMBEDDING_DIM if config.pre_train_embedding==True else WORD_EMBEDDING_DIM_NO_PRETRAIN
     if config.model_type =="gru":
         #embedding在encoder 和decoder外面因为他们共用embedding
-        embedding_layer = nn.Embedding(voc_size, WORD_EMBEDDING_DIMs)
+        embedding_layer = nn.Embedding(voc_size, WORD_EMBEDDING_DIMs,padding_idx=PAD_token)
         if config.pre_train_embedding==True:embedding_layer.weight.data.copy_(torch.from_numpy(build_embedding(voc,config.voc_and_embedding_save_path)))
-        encoder = network.EncoderRNN_noKG(hidden_size, WORD_EMBEDDING_DIMs, embedding_layer, config.n_layers, config.dropout)
+        encoder = network.EncoderRNN(hidden_size, WORD_EMBEDDING_DIMs, embedding_layer, config.n_layers, config.dropout)
         attn_model = config.attn
         decoder = network.LuongAttnDecoderRNN(attn_model, embedding_layer,WORD_EMBEDDING_DIMs, hidden_size, voc_size,\
             config.n_layers, config.dropout)
     elif config.model_type =="trans":
-        voc_embedding_layer = nn.Embedding(voc_size, WORD_EMBEDDING_DIMs)
+        voc_embedding_layer = nn.Embedding(voc_size, config.hidden_size,padding_idx=PAD_token)
         if config.pre_train_embedding==True:voc_embedding_layer.weight.data.copy_(torch.from_numpy(build_embedding(voc,config.voc_and_embedding_save_path)))
-        pos_embedding_layer=network.PositionalEncoding(WORD_EMBEDDING_DIMs,n_position=300)
-        encoder =network.TransfomerEncoder(config,voc_embedding_layer,pos_embedding_layer,WORD_EMBEDDING_DIMs)
-        decoder =network.TransfomerDecoder(config,voc_embedding_layer,WORD_EMBEDDING_DIMs,pos_embedding_layer,voc_size)
+        pos_embedding_layer=network.PositionalEncoding(config.hidden_size,n_position=300)
+        encoder =network.TransfomerEncoder(config,voc_embedding_layer,pos_embedding_layer,config.hidden_size)
+        decoder =network.TransfomerDecoder(config,voc_embedding_layer,config.hidden_size,pos_embedding_layer,voc_size)
     else: raise Exception("model type error!")
     #model 大小计算
     encoder_para = sum([np.prod(list(p.size())) for p in encoder.parameters()])
@@ -141,9 +142,7 @@ def build_models(voc,config,checkpoint):
         print('**work with CPU **')
         encoder = encoder.to(network.Global_device)
         decoder = decoder.to(network.Global_device)
-    if config.run_type!="train":
-        encoder.eval()
-        decoder.eval()
+
     return encoder,decoder
 def save_checkpoint(handeler):
     epoch,start_iteration,train_loader,encoder,decoder,encoder_optimizer,decoder_optimizer,config=handeler
@@ -188,6 +187,8 @@ def train_trans(config):
     print('-Building models ...')
     checkpoint =torch.load(config.continue_training,map_location=network.Global_device)  if config.continue_training != " " else None
     encoder,decoder=build_models(DuConv_DataSet.voc,config,checkpoint)
+    encoder.train()
+    decoder.train()
     print('-Building optimizers ...')
     encoder_optimizer = ScheduledOptim(
         optim.Adam(encoder.parameters(), betas=(0.9, 0.98), eps=1e-09),
@@ -230,40 +231,26 @@ def trainIter_trans(train_handler):
     for batch_idx, data in enumerate(train_loader):
         batch_idx+=1
         history,knowledge,responses=data["history"],data["knowledge"],data["response"]
-        history = pad_sequence(history,batch_first=True, padding_value=0)
-        knowledge = pad_sequence(knowledge,batch_first=True, padding_value=0)
-        
-        len_respons=[len(it) for it in responses]
-        len_respons.sort()
-        MAX_RESPONSE_LENGTH=len_respons[-1]-1
-        responses =pad_sequence(responses,batch_first=True, padding_value=0)
-        responses=responses.transpose(0,1)
-        if config.use_gpu and USE_CUDA: 
-            history,knowledge,responses= history.cuda() ,knowledge.cuda() ,responses.cuda()
+        #[B,L]
+        history = pad_sequence(history,batch_first=True, padding_value=0).to(network.Global_device)
+        knowledge = pad_sequence(knowledge,batch_first=True, padding_value=0).to(network.Global_device)
+        responses =pad_sequence(responses,batch_first=True, padding_value=0).to(network.Global_device)
+        decoder_input =responses[:,:-1].to(network.Global_device)
+        decoder_target =responses[:,1:].to(network.Global_device)
         #清空梯度
         encoder_optimizer.zero_grad()
         decoder_optimizer.zero_grad()
-        #enc_outs =[batchsize,seq,embedding]
+        #enc_outs =[batchsize,L,embedding]
         enc_output = encoder(history,knowledge)
-        #transformer decoder input 是之前生成的所有句子-》注意观察一下POSITION ENCODING 的移位情况
-        decoder_input = torch.LongTensor([SOS_token for _ in range(batch_size)]).reshape(batch_size,1) #[batch_size,1]
-        decoder_input = decoder_input.to(network.Global_device)
-        loss=0
-        for t in range(MAX_RESPONSE_LENGTH):
-            decoder_output, self_attentions, context_attentions = decoder( decoder_input, enc_output )
-            #TODO:我用的选最后一个加squeeze. [b,l,dim]原文中又是如何变成[b,dim]的？
-            decoder_output=decoder_output[:,-1,:].squeeze(1)
-            #topi为概率最大词汇的下标shape=[batch_Size,1]
-            _, topi = decoder_output.topk(1) # [batch_Size, 1]
-            decoder_input=torch.cat((decoder_input,topi),1)
-            decoder_input = decoder_input.to(network.Global_device)  
-            # decoder_output=[batch_Size, voc]  responses[seq,batchsize]
-            
-            loss += F.cross_entropy(decoder_output, responses[t+1], ignore_index=PAD_token)
+
+        dec_enc_attn_pad_mask =get_attn_pad_mask(decoder_input, history).to(network.Global_device)
+        #decoder_output=[B*(L-1),VOCSIZE]
+        decoder_output= decoder( decoder_input, enc_output ,dec_enc_attn_pad_mask)
+        loss = F.cross_entropy(decoder_output, decoder_target.contiguous().view(-1), ignore_index=PAD_token)
         loss.backward()
-        # clip = 50.0
-        # _ = torch.nn.utils.clip_grad_norm_(encoder.parameters(), clip)
-        # _ = torch.nn.utils.clip_grad_norm_(decoder.parameters(), clip)
+        clip = 100.0
+        _ = torch.nn.utils.clip_grad_norm_(encoder.parameters(), clip)
+        _ = torch.nn.utils.clip_grad_norm_(decoder.parameters(), clip)
         encoder_optimizer.step_and_update_lr()    
         decoder_optimizer.step_and_update_lr()  
         stage_total_loss+=loss.cpu().item() 
@@ -293,6 +280,8 @@ def train_gru(config):
     print('-Building models ...')
     checkpoint =torch.load(config.continue_training,map_location=network.Global_device)  if config.continue_training != " " else None
     encoder,decoder=build_models(DuConv_DataSet.voc,config,checkpoint)
+    encoder.train()
+    decoder.train()
     print('-Building optimizers ...')
     encoder_optimizer = optim.Adam(encoder.parameters(), lr=config.lr)
     decoder_optimizer = optim.Adam(decoder.parameters(), lr=config.lr )
@@ -327,6 +316,7 @@ def trainIter_gru(train_handler):
     stage_total_loss=0
     epoch_loss_avg=0
     batch_size=config.batch_size
+    teacher_forcing_ratio=1/(epoch**(-2))
     for batch_idx, data in enumerate(train_loader):
         batch_idx+=1
         history,knowledge,responses=data["history"],data["knowledge"],data["response"]
@@ -352,19 +342,29 @@ def trainIter_gru(train_handler):
         loss=0
         MAX_RESPONSE_LENGTH=int(len_response[0].item())-1
         responses=responses.index_select(1,idx_unsort3)
-        for t in range(MAX_RESPONSE_LENGTH):
-            decoder_output, decoder_hidden, decoder_attn = decoder(
-                decoder_input, decoder_hidden, encoder_outputs
-            )
-            #topi为概率最大词汇的下标
-            _, topi = decoder_output.topk(1) # [batch_Size, 1]
+        use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
+        if use_teacher_forcing == False :
+            for t in range(MAX_RESPONSE_LENGTH):
+                decoder_output, decoder_hidden, decoder_attn = decoder(
+                    decoder_input, decoder_hidden, encoder_outputs
+                )
+                #topi为概率最大词汇的下标
+                _, topi = decoder_output.topk(1) # [batch_Size, 1]
 
-            decoder_input = torch.LongTensor([topi[i][0] for i in range(batch_size)]).reshape(1,batch_size)
-            decoder_input = decoder_input.to(network.Global_device)  
-            # decoder_output=[batch_Size, voc]  responses[seq,batchsize]
-            loss += F.cross_entropy(decoder_output, responses[t+1], ignore_index=EOS_token)
+                decoder_input = torch.LongTensor([topi[i][0] for i in range(batch_size)]).reshape(1,batch_size)
+                decoder_input = decoder_input.to(network.Global_device)  
+                # decoder_output=[batch_Size, voc]  responses[seq,batchsize]
+                loss += F.cross_entropy(decoder_output, responses[t+1], ignore_index=EOS_token)
+        else:
+            for t in range(MAX_RESPONSE_LENGTH):
+                decoder_output, decoder_hidden, decoder_attn = decoder(
+                    decoder_input, decoder_hidden, encoder_outputs
+                )
+                decoder_input = responses[t+1].view(1, -1) # Next input is current target
+                decoder_input = decoder_input.to(network.Global_device)  
+                loss += F.cross_entropy(decoder_output, responses[t+1], ignore_index=EOS_token)
         loss.backward()
-        clip = 50.0
+        clip = 100.0
         _ = torch.nn.utils.clip_grad_norm_(encoder.parameters(), clip)
         _ = torch.nn.utils.clip_grad_norm_(decoder.parameters(), clip)
         encoder_optimizer.step()    
@@ -388,6 +388,7 @@ def trainIter_gru(train_handler):
             save_checkpoint(save_handler)
         start_iteration+=1
     return len(train_loader),epoch_loss_avg/len(train_loader)
+
 
 if __name__ == "__main__":
     #配置解析CMD 参数

@@ -147,16 +147,15 @@ def calc_f1(data):
     f1 = 2 * p * r / (p + r)
     return f1
 
-def convert_result_for_eval(sample_file, output_file_dir, output_file):
+def convert_result_for_eval(sample_file, result_file, output_file):
     """
     convert_result_for_eval
     """
-    result_file=os.path.join(output_file_dir,"result.txt")
     sample_list = [line.strip() for line in open(sample_file, 'r',encoding="utf-8")]
     result_list = [line.strip() for line in open(result_file, 'r',encoding="utf-8")]
 
     assert len(sample_list) == len(result_list)
-    fout = open(output_file, 'w')
+    fout = open(output_file, 'w',encoding="utf-8")
     for i, sample in enumerate(sample_list):
         sample = json.loads(sample, encoding="utf-8", \
                               object_pairs_hook=OrderedDict)

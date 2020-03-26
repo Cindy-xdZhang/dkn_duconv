@@ -81,9 +81,11 @@ def data_preprocess(path_raw,text_file,topic_file,topic_generalization=True,test
         """
         #整数、小数均替换为<num>
         if isinstance(tokens, str): 
-            s = re.sub('\d+', '<num>', tokens)
-            s = re.sub('\<num>\.<num>', '<num>', s)
-            s= re.sub('\《.+》','<works>',s)
+            s = re.sub('\d+', ' <num> ', tokens)
+            s = re.sub('\s<num>\s\.\s<num>\s', ' <num> ', s)
+            s= re.sub('\《.+》',' <works> ',s)
+            s=re.sub("[\.\!\/,$%^*()+\"\']+|[+——！。~@#￥%……&*（）-]", " ", s) 
+            s=re.sub("\s{2,5}", " ", s) 
             return s
         elif isinstance(tokens, list):
             tokens_list = [tokenize(t) for t in tokens]
@@ -146,7 +148,7 @@ def data_preprocess(path_raw,text_file,topic_file,topic_generalization=True,test
                                 sample["knowledge"] = tokenize(generize(sample["knowledge"],value, key))
                                 sample["history"] =  tokenize(generize(sample["history"],value, key))
                                 sample["response"] =  tokenize(generize(sample["response"],value, key))
-                                # model_text = model_text.replace(value, key)     
+                                # model_text = model_text.replace(value, key)    
                         topic_dict = json.dumps(topic_dict, ensure_ascii=False)
                         model_text=json.dumps(sample, ensure_ascii=False)
                         fout_text.write(model_text + "\n")
@@ -198,16 +200,21 @@ def data_preprocess(path_raw,text_file,topic_file,topic_generalization=True,test
 
     sample2multi_generize_topic(path_raw,text_file,topic_file)
 
-#TODO:
-#    sample["knowledge"] = re.sub("[\s+\.\!\/_,$%^*(+\"\']+|[+——！，。？、~@#￥%……&*（）]", "", sample["knowledge"])
-#                         sample["history"] = re.sub("[\s+\.\!\/_,$%^*(+\"\']+|[+——！，。？、~@#￥%……&*（）]", "", sample["knowledge"])
-#                         sample["response"] = re.sub("[\s+\.\!\/_,$%^*(+\"\']+|[+——！，。？、~@#￥%……&*（）]", "", sample["knowledge"])
+
+
 if __name__ == "__main__":
     try:
-        # data_preprocess(sys.argv[1],sys.argv[2],sys.argv[3])
+        path_sample=os.path.join("dkn_duconv","duconv_data","train.txt")
+        path_sample2=os.path.join("dkn_duconv","duconv_data","text.train.txt")
+        path_sample3=os.path.join("dkn_duconv","duconv_data","topic.train.txt")
+        data_preprocess(path_sample,path_sample2,path_sample3,test=False)
         path_sample=os.path.join("dkn_duconv","duconv_data","dev.txt")
         path_sample2=os.path.join("dkn_duconv","duconv_data","text.dev.txt")
         path_sample3=os.path.join("dkn_duconv","duconv_data","topic.dev.txt")
         data_preprocess(path_sample,path_sample2,path_sample3,test=False)
+        path_sample=os.path.join("dkn_duconv","duconv_data","test_1.txt")
+        path_sample2=os.path.join("dkn_duconv","duconv_data","text.test.txt")
+        path_sample3=os.path.join("dkn_duconv","duconv_data","topic.test.txt")
+        data_preprocess(path_sample,path_sample2,path_sample3,test=True)
     except KeyboardInterrupt:
         print("\nExited from the program ealier!")
