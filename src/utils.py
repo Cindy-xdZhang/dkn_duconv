@@ -228,6 +228,7 @@ def entity_index(train_data):
     print("-Counted triples:", voc.triple_cnt,"\nCounted entities",voc.entity_cnt)
     return voc
 #检查
+
 def _check_KnowledgeList_and_Vocabulary_implementation():
     # path_raw=os.path.join("data","duconv","train.txt")
     # path_sample=os.path.join("data","duconv","sample.train.txt")
@@ -315,11 +316,12 @@ def build_embedding(Vocabulary=None,voc_embedding_save_dir="dkn_duconv"):
         if os.path.exists(voc_embedding_save_path)==False:
             word2index=Vocabulary.word2index
             print('-getting word embeddings of '+ str(Vocabulary.n_words)  +' words from pretrain model...')
-            embeddings = np.ones([len(word2index) , WORD_EMBEDDING_DIM],dtype=float)
+            embeddings = np.random.rand(len(word2index), WORD_EMBEDDING_DIM)
             load_pretrain_SGNS(embeddings)
+            embeddings[0]=0
             print('- writing word embeddings ...')
             if  os.path.exists(voc_embedding_save_dir)==False:os.mkdir(voc_embedding_save_dir)
-            # np.save(voc_embedding_save_path, embeddings)
+            np.save(voc_embedding_save_path, embeddings)
             return embeddings
         elif os.path.exists(voc_embedding_save_path)==True:
             print('-load word embeddings ...')

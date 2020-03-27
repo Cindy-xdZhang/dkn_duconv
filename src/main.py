@@ -33,7 +33,7 @@ def arg_config():
         print('--n_layers: '+str(config.n_layers))
         print('--attn: '+str(config.attn))
         print('--select_kg: '+str(config.select_kg))
-        print('--sha: '+str(config.pre_train_embedding))
+        print('--use pre_train_embedding: '+str(config.pre_train_embedding))
         print('--shareW: '+str(config.shareW))
         if config.continue_training==" ":
             print('--continue_training(load model from checkpoint): NONE')
@@ -61,7 +61,7 @@ def arg_config():
     net_arg.add_argument("--n_heads", type=int, default=8)
     net_arg.add_argument("--shareW", type=str2bool, default=False)
     net_arg.add_argument('-sk', "--select_kg", type=str2bool, default=True)
-    net_arg.add_argument('-pre', "--pre_train_embedding", type=str2bool, default=True)
+    net_arg.add_argument('-pre', "--pre_train_embedding", type=str2bool, default=False)
 
     # Training / Testing CMD参数组
     train_arg = parser.add_argument_group("Training")
@@ -104,7 +104,7 @@ def build_models(voc,config,checkpoint):
         #embedding在encoder 和decoder外面因为他们共用embedding
         embedding_layer = nn.Embedding(voc_size, WORD_EMBEDDING_DIMs,padding_idx=PAD_token)
         if config.pre_train_embedding==True:embedding_layer.weight.data.copy_(torch.from_numpy(build_embedding(voc,config.voc_and_embedding_save_path)))
-        encoder = network.EncoderRNN(hidden_size, WORD_EMBEDDING_DIMs, embedding_layer, config.n_layers, config.dropout)
+        encoder = network.EncoderRNN_noKG(hidden_size, WORD_EMBEDDING_DIMs, embedding_layer, config.n_layers, config.dropout)
         attn_model = config.attn
         decoder = network.LuongAttnDecoderRNN(attn_model, embedding_layer,WORD_EMBEDDING_DIMs, hidden_size, voc_size,\
             config.n_layers, config.dropout)

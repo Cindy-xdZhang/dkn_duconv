@@ -302,6 +302,8 @@ def dev(handler):
                 str=template.format(epoch,epoch_loss_avg,\
                     time.asctime(time.localtime(time.time())))
                 f.write(str)
+    encoder.train()
+    decoder.train()
 
 def dummy_result(resultfile,textfile,dummyfile):
     ress=[]
