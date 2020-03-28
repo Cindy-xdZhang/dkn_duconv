@@ -22,6 +22,8 @@ USE_CUDA = torch.cuda.is_available()
 torch.backends.cudnn.enabled = True
 torch.backends.cudnn.benchmark = True
 WORD_EMBEDDING_DIM_NO_PRETRAIN=20
+
+
 def arg_config():
     def print_config_information(config):
         print('======================model===============================')
@@ -46,10 +48,11 @@ def arg_config():
         print('--save_iteration: '+str(config.save_iteration))
         print('===========================================================')
     """ config """
+    project_root_dir=os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
     parser = argparse.ArgumentParser()
     # Network CMD参数组
     net_arg = parser.add_argument_group("Network")
-    net_arg.add_argument("-m","--model_type", type=str, default='gru',
+    net_arg.add_argument("-m","--model_type", type=str, default='trans',
                          choices=['trans', 'gru'])
     net_arg.add_argument('-hi',"--hidden_size", type=int, default=128)
     net_arg.add_argument("--n_layers", type=int, default=1)
@@ -82,13 +85,15 @@ def arg_config():
     misc_arg.add_argument('-p',"--log_steps", type=int, default=10)
     misc_arg.add_argument('-s',"--save_iteration", type=int, default=4000,help='Every save_iteration iteration(s) save checkpoint model ')   
     #路径参数
-    misc_arg.add_argument('-i',"--data_dir", type=str,  default="C:\\Users\\10718\\PycharmProjects\\dkn_duconv\\duconv_data",\
+    misc_arg.add_argument('-i',"--data_dir", type=str,  default=os.path.join(project_root_dir,"duconv_data"),\
         help="The input text data path.")
-    misc_arg.add_argument("--voc_and_embedding_save_path", type=str,  default="dkn_duconv",help="The path for voc and embedding file.")
-    misc_arg.add_argument("--output_path", type=str, default="dkn_duconv/output/")
-    misc_arg.add_argument("--save_model_path", type=str, default="dkn_duconv/models")
+    misc_arg.add_argument("--voc_and_embedding_save_path", type=str,  default=project_root_dir,help="The path for voc and embedding file.")
+    misc_arg.add_argument("--output_path", type=str, default=os.path.join(project_root_dir,"output"))
+    misc_arg.add_argument("--save_model_path", type=str, default=os.path.join(project_root_dir,"models"))
     misc_arg.add_argument('-con',"--continue_training", type=str, default=" ")
-    misc_arg.add_argument('-log',"--logfile_path", type=str, default="./log.txt")
+    misc_arg.add_argument('-log',"--logfile_path", type=str, default=os.path.join(project_root_dir,"log.txt"))
+    
+    
     config = parser.parse_args()
     print_config_information(config)
     if os.path.exists(config.logfile_path): 

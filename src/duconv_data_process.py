@@ -120,7 +120,7 @@ def data_preprocess(path_raw,text_file,topic_file,topic_generalization=True,test
                         sample["history"] = conversation[:j]
                         sample["response"] = conversation[j]
 
-                        # response = sample["response"] if "response" in sample else "null"
+                        get_target_kg(sample)
                         
                         topic_a =  sample["goal"][0][1]
                         topic_b =  sample["goal"][0][2]
@@ -200,6 +200,20 @@ def data_preprocess(path_raw,text_file,topic_file,topic_generalization=True,test
 
     sample2multi_generize_topic(path_raw,text_file,topic_file)
 
+#TODO:
+def get_target_kg(dataitem,beam=3):
+    goal=dataitem['goal']
+    kg=dataitem['knowledge']
+    kg_chose=[0]*len(kg)
+    his=dataitem['history']
+    res=dataitem['response']
+    query=his+goal if len(his) !=0 else goal
+    RES=res.split()
+    for i, [S, P, O] in enumerate(kg):
+        for  s in S.split():if s is in RES:kg_chose[i]+=1
+        for  p in P.split():if p is in RES:kg_chose[i]+=1
+        for  o in O.split():if o is in RES:kg_chose[i]+=1
+        
 
 
 if __name__ == "__main__":

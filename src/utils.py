@@ -82,6 +82,7 @@ class Vocabulary:
             length=len(kg.split())
             item["knowledge"]=self.encoding_sentence(kg,max_length=length)
             
+            
 
 
     def encoding_sentence(self,sentence,max_length=MAX_TITLE_LENGTH,form="int"):
@@ -299,7 +300,7 @@ def PCA_embedding(path_in,path_out):
         f.close()
 def build_embedding(Vocabulary=None,voc_embedding_save_dir="dkn_duconv"):
     def load_pretrain_SGNS(embeddings):
-        embeddings_file="dkn_duconv/sgns.wiki_pca.txt"
+        embeddings_file=os.path.join(voc_embedding_save_dir,"sgns.wiki_pca.txt")
         embeded_words=0
         word2index=Vocabulary.word2index
         with open(embeddings_file, 'r', encoding='utf-8') as f:
@@ -365,4 +366,4 @@ def get_infinite_batches(self, data_loader):
         while True:
             for i, (images, _) in enumerate(data_loader):
                 yield images    
-_check_KnowledgeList_and_Vocabulary_implementation()
+# _check_KnowledgeList_and_Vocabulary_implementation()
