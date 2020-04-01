@@ -6,7 +6,7 @@
 #@author    :Cindy, xd Zhang 
 #@version   :0.1
 #'''
-
+import time
 import os
 import json
 import random
@@ -23,7 +23,7 @@ EOS_token = 2
 #average # utterances per dialog	9.1
 #average # words per utterance	10.6
 MAX_TITLE_LENGTH=20
-WORD_EMBEDDING_DIM=20
+WORD_EMBEDDING_DIM_PRETRAIN=20
 
 class Vocabulary:
     def __init__(self, name="None"):
@@ -288,7 +288,7 @@ def PCA_embedding(path_in,path_out):
                 num_vec= np.array([float(item) for item in vec.split()])
                 vecs.append(num_vec)
         f.close()
-    pca = PCA(n_components=WORD_EMBEDDING_DIM)   #降到2维
+    pca = PCA(n_components=WORD_EMBEDDING_DIM_PRETRAIN)   #降到2维
     pca.fit(vecs)
     newX=pca.fit_transform(vecs)
     with open(path_out,'w',encoding='utf-8') as f:
@@ -313,11 +313,11 @@ def build_embedding(Vocabulary=None,voc_embedding_save_dir="dkn_duconv"):
         print("Using sgns Word2Vec："+str(float(embeded_words/Vocabulary.n_words)*100)+ "% words are embedded.")
     if Vocabulary==None:raise Exception("No vocabulary information available!")
     else:
-        voc_embedding_save_path=os.path.join(voc_embedding_save_dir, '{!s}.npy'.format('duconv_voc_embedding_'+str(Vocabulary.n_words)+"_"+str(WORD_EMBEDDING_DIM)))
+        voc_embedding_save_path=os.path.join(voc_embedding_save_dir, '{!s}.npy'.format('duconv_voc_embedding_'+str(Vocabulary.n_words)+"_"+str(WORD_EMBEDDING_DIM_PRETRAIN)))
         if os.path.exists(voc_embedding_save_path)==False:
             word2index=Vocabulary.word2index
             print('-getting word embeddings of '+ str(Vocabulary.n_words)  +' words from pretrain model...')
-            embeddings = np.random.rand(len(word2index), WORD_EMBEDDING_DIM)
+            embeddings = np.random.rand(len(word2index), WORD_EMBEDDING_DIM_PRETRAIN)
             load_pretrain_SGNS(embeddings)
             embeddings[0]=0
             print('- writing word embeddings ...')
@@ -339,6 +339,24 @@ def str2bool(v):
         return False
     else:
         raise argparse.ArgumentTypeError('Unsupported value encountered.')
+def record_train_step(logfile_path,message,overall_loss=None):
+    if overall_loss is None:
+        epoch,batch_idx , epoch_length,print_loss_avg=message
+        print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}\ttime: {}'.format(
+                epoch, batch_idx , epoch_length,
+                100. * batch_idx / epoch_length, print_loss_avg, time.asctime(time.localtime(time.time())) ))
+        with open(logfile_path,'a') as f:
+            template=' Train Epoch: {} [{}/{}]\tLoss: {:.6f}\ttime: {}\n'
+            str=template.format(epoch,batch_idx ,epoch_length,print_loss_avg,\
+            time.asctime(time.localtime(time.time())))
+            f.write(str)
+    else: 
+        epoch=message
+        with open(logfile_path,'a') as f:
+            template=' Train Epoch: {} \t Overall Loss: {:.6f}\t time: {}\n'
+            str=template.format(epoch, overall_loss,time.asctime(time.localtime(time.time())))
+            print(str)
+            f.write(str)
 
 def padding_sort_transform(input_sEQ):
     """ input:[B x L]batch size 个变长句子TENSOR

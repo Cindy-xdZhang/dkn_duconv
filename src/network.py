@@ -7,18 +7,53 @@
 #@version   :0.1
 #'''
 import torch
+import time
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 from transformer_sublayers import *
+from torch.nn.utils.rnn import pad_sequence
+from utils import *
 Global_device="cpu"
+MAX_LENGTH=500
+WORD_EMBEDDING_DIM_NO_PRETRAIN=25
+def save_checkpoint(handeler):
+    epoch,start_iteration,emb,encoder,decoder,optimizer,config=handeler
+    if config.model_type =="gru":
+        save_directory = os.path.join(config.save_model_path,config.model_type,'L{}_H{}_'.format(config.n_layers,config.hidden_size)+config.attn)
+        if not os.path.exists(save_directory):
+                os.makedirs(save_directory)
+        save_path= os.path.join(save_directory,'Epo_{:0>2d}_iter_{:0>6d}.tar'.format(epoch,start_iteration))
+        torch.save({
+                'epoch': epoch,
+                'iteration': start_iteration,
+                'type':str(config.model_type),
+                'emb':emb.state_dict(),
+                'en': encoder.state_dict(),
+                'de': decoder.state_dict(),
+                'opt': optimizer.state_dict(),
+            }, save_path)
+    elif config.model_type =="trans":
+        pass
+        # save_directory = os.path.join(config.save_model_path,config.model_type,'L{}_H{}'.format(config.n_layers,config.hidden_size))
+        # if not os.path.exists(save_directory):
+        #         os.makedirs(save_directory)
+        # save_path= os.path.join(save_directory,'Epo_{:0>2d}_iter_{:0>6d}.tar'.format(epoch,start_iteration))
+        # torch.save({
+        #         'epoch': epoch,
+        #         'iteration': start_iteration,
+        #         'type':str(config.model_type),
+        #         'en': encoder.state_dict(),
+        #         'de': decoder.state_dict(),
+        #         'en_opt': encoder_optimizer.state_dict(),
+        #         'de_opt': decoder_optimizer.state_dict(),
+        #     }, save_path)    
 #=========================GRU seq2seq=================================
 class EncoderRNN_noKG(nn.Module):
-    def __init__(self, hidden_size, embedding_size, embedding, n_layers=1, dropout=0):
+    def __init__(self, hidden_size, embedding_size, n_layers=1, dropout=0):
         super(EncoderRNN_noKG, self).__init__()
         self.n_layers = n_layers
         self.hidden_size = hidden_size
-        self.embedding = embedding
         self.gru_History = nn.GRU(embedding_size, hidden_size, n_layers,
                         dropout=(0 if n_layers == 1 else dropout), bidirectional=True,batch_first =False)
         torch.nn.init.orthogonal_( self.gru_History.weight_hh_l0)
@@ -30,10 +65,10 @@ class EncoderRNN_noKG(nn.Module):
         # self.W1=torch.nn.Linear(self.hidden_size*2, self.hidden_size, bias=True)
         # self.PReLU1=torch.nn.PReLU()
 
-    def forward(self, input_history_seq,input_history_lengths,input_kg_seq,input_kg_lengths, unsort_idxs):
+    def forward(self, input_history_seq_embedded,input_history_lengths,input_kg_seq,input_kg_lengths, unsort_idxs):
         unsort_idx_history,unsort_idx_kg=unsort_idxs
         #history
-        input_history_seq_embedded = self.embedding(input_history_seq)
+        # input_history_seq_embedded = self.embedding(input_history_seq)
         input_history_seq_packed = torch.nn.utils.rnn.pack_padded_sequence(input_history_seq_embedded, input_history_lengths,batch_first=False)
         his_outputs, hidden_his= self.gru_History(input_history_seq_packed, None)
         his_outputs, _ = torch.nn.utils.rnn.pad_packed_sequence(his_outputs,batch_first=False)
@@ -42,12 +77,10 @@ class EncoderRNN_noKG(nn.Module):
         his_outputs = his_outputs[:, :, :self.hidden_size] + his_outputs[:, : ,self.hidden_size:] # Sum bidirectional outputs (batch, 1, hidden)
         return his_outputs, hidden_his
 class EncoderRNN(nn.Module):
-    def __init__(self, hidden_size, embedding_size, embedding, n_layers=1, dropout=0):
+    def __init__(self, hidden_size, embedding_size, n_layers=1, dropout=0):
         super(EncoderRNN, self).__init__()
         self.n_layers = n_layers
         self.hidden_size = hidden_size
-        self.embedding = embedding
-
         self.gru_KG = nn.GRU(embedding_size, hidden_size, n_layers,
                         dropout=(0 if n_layers == 1 else dropout), bidirectional=True,batch_first =False)
         self.gru_History = nn.GRU(embedding_size, hidden_size, n_layers,
@@ -144,7 +177,7 @@ class Attn(nn.Module):
             energy = self.v.squeeze(0).dot(energy.squeeze(0))
             return energy
 class LuongAttnDecoderRNN(nn.Module):
-    def __init__(self, attn_model, embedding,embedding_size, hidden_size, output_size, n_layers=1, dropout=0.1):
+    def __init__(self, attn_model,embedding_size, hidden_size, output_size, n_layers=1, dropout=0.1):
         super(LuongAttnDecoderRNN, self).__init__()
 
         # Keep for reference
@@ -153,9 +186,6 @@ class LuongAttnDecoderRNN(nn.Module):
         self.output_size = output_size
         self.n_layers = n_layers
         self.dropout = dropout
-
-        # Define layers
-        self.embedding = embedding
         # self.embedding_dropout = nn.Dropout(dropout)
         self.gru = nn.GRU(embedding_size, hidden_size, n_layers,\
             dropout=(0 if n_layers == 1 else dropout), batch_first=False)
@@ -166,16 +196,13 @@ class LuongAttnDecoderRNN(nn.Module):
         if attn_model != 'none':
             self.attn = Attn(attn_model, hidden_size)
 
-    def forward(self, input_seq, last_hidden, encoder_outputs):
+    def forward(self, input_seq_embedded, last_hidden, encoder_outputs):
         # Note: we run this one step at a time
-        embedded = self.embedding(input_seq)#[batch,1,embedding_size]
         # embedded = self.embedding_dropout(embedded) 
-        if(embedded.size(0) != 1):
-            raise ValueError('Decoder input sequence length should be 1')
 
         # Get current hidden state from input word and last hidden state
         #batch_first=True 不影响hidden初始化的格式是(num_layers * num_directions, batch, hidden_size)
-        rnn_output, hidden = self.gru(embedded, last_hidden)
+        rnn_output, hidden = self.gru(input_seq_embedded, last_hidden)
 
         # Calculate attention from current RNN state and all encoder outputs;
         # apply to encoder outputs to get weighted average
@@ -195,159 +222,223 @@ class LuongAttnDecoderRNN(nn.Module):
 
         # Return final output, hidden state, and attention weights (for visualization)
         return output, hidden, attn_weights
+class GRU_Encoder_Decoder(nn.Module):
+    def __init__(self, config,voc):
+        super(GRU_Encoder_Decoder, self).__init__()
+        voc_size=voc.n_words
+        print('-Building GRU_Encoder_Decoder ...')
+        self.config=config
+        WORD_EMBEDDING_DIMs=WORD_EMBEDDING_DIM_PRETRAIN if config.pre_train_embedding==True \
+            else WORD_EMBEDDING_DIM_NO_PRETRAIN
+        self.embedding=nn.Embedding(voc_size, WORD_EMBEDDING_DIMs,padding_idx=PAD_token)
+        if config.pre_train_embedding==True:self.embedding.weight.data.copy_(torch.from_numpy(\
+            build_embedding(voc,config.voc_and_embedding_save_path)))
+        self.encoder=EncoderRNN_noKG(config.hidden_size,WORD_EMBEDDING_DIMs,config.n_layers,config.dropout)
+        self.decoder=LuongAttnDecoderRNN(config.attn,WORD_EMBEDDING_DIMs, config.hidden_size, voc_size, n_layers=config.n_layers, dropout=config.dropout)
+        encoder_para = sum([np.prod(list(p.size())) for p in self.encoder.parameters()])
+        decoder_para = sum([np.prod(list(p.size())) for p in self.decoder.parameters()])
+        print('Build encoder with params: {:4f}M'.format( encoder_para * 4 / 1000 / 1000))
+        print('Build decoder with params: {:4f}M'.format( decoder_para * 4 / 1000 / 1000))
+        #loading
+        checkpoint =torch.load(config.continue_training,map_location=Global_device) \
+            if config.continue_training != " " else None
+        if checkpoint != None:
+            if checkpoint['type'] !=config.model_type:
+                raise Exception("checkpoint and train model type doesn't match!")
+            print('-loading models from checkpoint .....')
+            self.encoder.load_state_dict(checkpoint['en'])
+            self.decoder.load_state_dict(checkpoint['de'])
+            self.embedding.load_state_dict(checkpoint['emb'])
+        self.checkpoint=checkpoint
+        self.teacher_forcing_ratio=1
+    def forward(self, BatchData):
+        batch_size=self.config.batch_size
+        history,knowledge,responses=BatchData["history"],BatchData["knowledge"],BatchData["response"]
+        #log2020.2.23:之前没有发现padding_sort_transform后每个batch内的顺序变了,必须把idx_unsort 也加进来
+        history,len_history,idx_unsort1 = padding_sort_transform(history)
+        knowledge,len_knowledge,idx_unsort2 = padding_sort_transform(knowledge)
+        responses,len_response,idx_unsort3 = padding_sort_transform(responses)
+        history,idx_unsort1 =history.to(Global_device),idx_unsort1.to(Global_device) 
+        knowledge,idx_unsort2= knowledge.to(Global_device),idx_unsort2.to(Global_device)
+        responses,idx_unsort3 = responses.to(Global_device),idx_unsort3.to(Global_device)
+        #encoder_outputs=torch.Size([ 154(seq),2 (batchsize), 512(hiddensize)])
+        # encoder_hidden=[ (direction*layer),batchsie,hiddensize]
+        unsort_idxs=(idx_unsort1,idx_unsort2)
+        history= self.embedding(history)
+        encoder_outputs, encoder_hidden = self.encoder(history,len_history,knowledge,len_knowledge,unsort_idxs)
+
+        decoder_input = torch.LongTensor([SOS_token for _ in range(batch_size)]).reshape(1,batch_size) #[batch_size,1]
+        decoder_input = decoder_input.to(Global_device)
+        #decoder 不用双向
+        decoder_hidden = encoder_hidden[:self.decoder.n_layers]
+        loss=0
+        MAX_RESPONSE_LENGTH=int(len_response[0].item())-1
+        responses=responses.index_select(1,idx_unsort3)
+        use_teacher_forcing = True if random.random() < self.teacher_forcing_ratio else False
+        if use_teacher_forcing == False :
+            for t in range(MAX_RESPONSE_LENGTH):
+                decoder_input= self.embedding(decoder_input)
+                decoder_output, decoder_hidden, decoder_attn = self.decoder(
+                    decoder_input, decoder_hidden, encoder_outputs
+                )
+                #topi为概率最大词汇的下标
+                _, topi = decoder_output.topk(1) # [batch_Size, 1]
+
+                decoder_input = torch.LongTensor([topi[i][0] for i in range(batch_size)]).reshape(1,batch_size)
+                decoder_input = decoder_input.to(Global_device)  
+                # decoder_output=[batch_Size, voc]  responses[seq,batchsize]
+                loss += F.cross_entropy(decoder_output, responses[t+1], ignore_index=EOS_token)
+        else:
+            for t in range(MAX_RESPONSE_LENGTH):
+                decoder_input= self.embedding(decoder_input)
+                decoder_output, decoder_hidden, decoder_attn = self.decoder(
+                    decoder_input, decoder_hidden, encoder_outputs
+                )
+                decoder_input = responses[t+1].view(1, -1) # Next input is current target
+                decoder_input = decoder_input.to(Global_device)  
+                loss += F.cross_entropy(decoder_output, responses[t+1], ignore_index=EOS_token)
+        return loss,MAX_RESPONSE_LENGTH        
+    def train(self, train_loader,dev_loader,optimizer):
+        print('-Initializing training process...')
+        start_epoch=1
+        start_iteration = 1
+        if self.checkpoint != None:
+            start_iteration = self.checkpoint['iteration'] +1
+            start_epoch= self.checkpoint['epoch'] 
+        if start_iteration==int(len(train_loader)//self.config.batch_size)+1:start_epoch+=1
+        end_epoch=self.config.end_epoch
+        for epoch_id in range(start_epoch, end_epoch):
+            iterations,epoch_loss= self.trainIter_gru(epoch_id,start_iteration,train_loader,optimizer)   
+            start_iteration+=iterations
+            record_train_step(self.config.logfile_path,epoch_id,epoch_loss)
+            self.dev(epoch_id,dev_loader)
+    def trainIter_gru(self, epoch,start_iteration,train_loader,optimizer):
+        self.encoder.train()
+        self.decoder.train()
+        self.embedding.train()
+        stage_total_loss=0
+        epoch_loss_avg=0
+        batch_size=self.config.batch_size
+        self.teacher_forcing_ratio=1/(epoch**(-2))
+        for batch_idx, data in enumerate(train_loader):
+            batch_idx+=1
+            #清空梯度
+            optimizer.zero_grad()
+            loss,nwords=self.forward(data)
+            loss.backward()
+            clip = 100.0
+            _ = torch.nn.utils.clip_grad_norm_(self.parameters(), clip)
+            optimizer.step()    
+            stage_total_loss+=(loss.cpu().item()/nwords)
+            epoch_loss_avg+=(loss.cpu().item() /nwords)
+            #相当于更新权重值
+            if batch_idx % self.config.log_steps == 0:
+                print_loss_avg = (stage_total_loss / self.config.log_steps)
+                message=epoch,batch_idx , len(train_loader),print_loss_avg
+                record_train_step(self.config.logfile_path,message)
+                stage_total_loss=0
+            if start_iteration % self.config.save_iteration == 0:
+                save_handler=(epoch,start_iteration, self.embedding,self.encoder,self.decoder,optimizer,self.config)
+                save_checkpoint(save_handler)
+            start_iteration+=1
+        return len(train_loader),epoch_loss_avg/len(train_loader)
+    def dev(self, epoch,dev_loader):
+        self.encoder.eval()
+        self.decoder.eval()
+        self.embedding.eval()
+        batch_size=self.config.batch_size
+        epoch_loss_avg=0
+        with torch.no_grad():
+            for batch_idx, data in enumerate(dev_loader):
+                loss,nwords=self.forward(data)
+                epoch_loss_avg+=(loss.cpu().item() /nwords)
+        epoch_loss_avg/=len(dev_loader)
+        print('Evaluate Epoch: {}\t avg Loss: {:.6f}\ttime: {}'.format(
+            epoch,epoch_loss_avg, time.asctime(time.localtime(time.time())) ))
+        with open(self.config.logfile_path,'a') as f:
+            template=' Evaluate Epoch: {}\t avg Loss: {:.6f}\ttime: {}\n'
+            str=template.format(epoch,epoch_loss_avg,\
+                time.asctime(time.localtime(time.time())))
+            f.write(str)
 #====================Transfomer========================================
-class PositionalEncoding(nn.Module):
-
-    def __init__(self, d_hid=300, n_position=200):
-        super(PositionalEncoding, self).__init__()
-
-        # Not a parameter
-        self.register_buffer('pos_table', self._get_sinusoid_encoding_table(n_position, d_hid))
-
-    def _get_sinusoid_encoding_table(self, n_position, d_hid):
-        ''' Sinusoid position encoding table '''
-        # TODO: make it with torch instead of numpy
-
-        def get_position_angle_vec(position):
-            return [position / np.power(10000, 2.0 *(hid_j //2) / d_hid  ) for hid_j in range(d_hid)]
-
-        sinusoid_table = np.array([get_position_angle_vec(pos_i) for pos_i in range(n_position)])
-        sinusoid_table[:, 0::2] = np.sin(sinusoid_table[:, 0::2])  # dim 2i
-        sinusoid_table[:, 1::2] = np.cos(sinusoid_table[:, 1::2])  # dim 2i+1
-        return torch.FloatTensor(sinusoid_table).unsqueeze(0)
+class TransformerEncoder(nn.Module):
+    ''' Scaled Dot-Product Attention '''
+    def __init__(self,config,voc_Size,embedding_layer):
+        super().__init__()
+        self.char_embedding=embedding_layer
+        self.Positional_Encoding=PositionalEncoding(d_hid=config.embedding_size, n_position=MAX_LENGTH)
+        self.layerstack=nn.ModuleList([ Encoder_layer(config.embedding_size,config.n_head,config.d_k,config.d_v,config.d_hidden,config.dropout) for _ in range(config.n_layers)  ])
 
     def forward(self, x):
-        return x + self.pos_table[:, :x.size(1)].clone().detach()
-class TransfomerEncoder(nn.Module):
-    def __init__(self, config, embedding,pos_embedding,embedding_size=300,dropout=0):
-        super(TransfomerEncoder, self).__init__()
-        # embedding
-        self.char_embedding =embedding
-        self.pos_embedding = pos_embedding
-        self.dropout=  nn.Dropout(dropout)
-        if config.shareW==True:
-            d_k=config.k_dims//config.n_heads
-            d_v=config.k_dims//config.n_heads
-            self.mh_w_qs1=nn.Linear(embedding_size, config.n_heads * d_k)
-            self.mh_w_vs1=nn.Linear(embedding_size, config.n_heads * d_v)
-            self.mh_w_fc1=nn.Linear( config.n_heads * d_v,embedding_size)
-            self.mh_w_qs2=nn.Linear(embedding_size, config.n_heads * d_k)
-            self.mh_w_vs2=nn.Linear(embedding_size, config.n_heads * d_v)
-            self.mh_w_fc2=nn.Linear( config.n_heads * d_v,embedding_size)
-            shareweight=[self.mh_w_qs1,self.mh_w_vs1,self.mh_w_qs2,self.mh_w_vs2]
-            for ly in shareweight:
-                nn.init.normal_(ly.weight, mean=0, std=np.sqrt(2.0 / (embedding_size + d_k)))
-            nn.init.xavier_normal(self.mh_w_fc2.weight)
-            nn.init.xavier_normal(self.mh_w_fc1.weight)
-        else:
-            self.mh_w_qs1=None
-            self.mh_w_vs1=None
-            self.mh_w_fc1=None
-            self.mh_w_qs2=None
-            self.mh_w_vs2=None
-            self.mh_w_fc2=None
-        if config.select_kg ==True:
-            #output_length~=inputlength/4
-            self.Ws_kg=  nn.Sequential(
-            nn.Conv1d(embedding_size,embedding_size*2,kernel_size=6,stride=2,padding=0),
-            nn.Conv1d(embedding_size*2,embedding_size,kernel_size=3,stride=2,padding=0),
-            nn.ReLU(inplace=True)
-            )
+        #X=B,L
+        slf_attn_mask=padding_mask(x)
+        output=self.Positional_Encoding(self.char_embedding(x))
+        for layer in self.layerstack:
+            output = layer(output,slf_attn_mask=slf_attn_mask)
+        return output
+class TransformerDecoder(nn.Module):
+    ''' Scaled Dot-Product Attention '''
+    def __init__(self,config,voc_Size,embedding_layer):
+        super().__init__()
+        self.Positional_Encoding=PositionalEncoding(d_hid=config.embedding_size, n_position=MAX_LENGTH)
+        self.layerstack=nn.ModuleList([ Decoder_layer(config.embedding_size,config.n_head,config.d_k,config.d_v,config.d_hidden,config.dropout) for _ in range(config.n_layers)  ])
+        self.char_embedding=embedding_layer
+    def forward(self, dec_input,enc_output,enc_input):
+        #X=B,L
+        slf_attn_mask=padding_mask(dec_input).to(Global_device)
+        sq_mask=sequence_mask(dec_input).to(Global_device)
+        slf_attn_mask = (torch.gt((slf_attn_mask.float() + sq_mask.float()), 0)).float().to(Global_device)
+        enc_dec_mask=get_attn_pad_mask(dec_input,enc_input).to(Global_device)
+
+        output=self.Positional_Encoding(self.char_embedding(dec_input))
         
-        self.layer_stack_kg = nn.ModuleList([
-            EncoderLayer(embedding_size,\
-                config.hidden_size, config.n_heads, config.k_dims, config.v_dims, config.dropout,self.mh_w_qs1,self.mh_w_vs1,self.mh_w_fc1)
-            for _ in range(config.n_layers)
-        ])
-        self.layer_stack_his= nn.ModuleList([
-            EncoderLayer(embedding_size,\
-                config.hidden_size, config.n_heads, config.k_dims, config.v_dims, config.dropout,self.mh_w_qs2,self.mh_w_vs2,self.mh_w_fc2)
-            for _ in range(config.n_layers)
-        ])
 
-    def forward(self, char_his, kg):
-        #history_embedded=[batchsize, seq=~106,embeddingsize=300]
-        enc_self_attn_mask=padding_mask(char_his).to(Global_device)
-        history_embedded= (self.pos_embedding(self.char_embedding(char_his)))
-        #kg_embed=[batchsize, seq=~103,embeddingsize=300]
-        #kg_embed=(self.pos_embedding(self.char_embedding(kg)))
-
-        for layer in self.layer_stack_kg:
-            history_embedded, _ = layer(history_embedded,slf_attn_mask=enc_self_attn_mask)
-        # if self.Ws_kg !=None:
-        #     info_embed=torch.cat((kg_embed,history_embedded),1)
-        #     info_embed = info_embed.transpose(1, 2)
-        #     kg_embed=self.Ws_kg(info_embed)
-        #     kg_embed = info_embed.transpose(1, 2)
-        # #kg_embed(layer)=[b,s,embedding size] ->layer不变dim
-        # for layer in self.layer_stack_his:
-        #     kg_embed, _ = layer(kg_embed)
-        
-        # inputs_src=torch.cat((history_embedded,kg_embed),dim=1)
-        inputs_src=history_embedded
-        # enc_outs = inputs_src.permute(0, 2, 1)
-        # enc_outs = torch.sum(enc_outs, dim=-1)#enc_outs =[batchsize,seq,embedding]->[batchsize,embedding]
-        # return self.fc_out(enc_outs)
-
-        return inputs_src
-class TransfomerDecoder(nn.Module):
-    def __init__(self,config,embedding,embedding_size,pos_embedding,voc_size,ffn_dim=512):
-        super(TransfomerDecoder, self).__init__()
-        self.seq_embedding = embedding
-        self.pos_embedding = pos_embedding
-        if config.shareW==True:
-            d_k=config.k_dims//config.n_heads
-            d_v=config.k_dims//config.n_heads
-            self.mh_w_qs1=nn.Linear(embedding_size, config.n_heads * d_k)
-            self.mh_w_vs1=nn.Linear(embedding_size, config.n_heads * d_v)
-            self.mh_w_fc1=nn.Linear( config.n_heads * d_v,embedding_size)
-            self.mh_w_qs2=nn.Linear(embedding_size, config.n_heads * d_k)
-            self.mh_w_vs2=nn.Linear(embedding_size, config.n_heads * d_v)
-            self.mh_w_fc2=nn.Linear( config.n_heads * d_v,embedding_size)
-            shareweight=[self.mh_w_qs1,self.mh_w_vs1,self.mh_w_qs2,self.mh_w_vs2]
-            for ly in shareweight:
-                nn.init.normal_(ly.weight, mean=0, std=np.sqrt(2.0 / (embedding_size + d_k)))
-            nn.init.xavier_normal(self.mh_w_fc2.weight)
-            nn.init.xavier_normal(self.mh_w_fc1.weight)
-        else:
-            self.mh_w_qs1=None
-            self.mh_w_vs1=None
-            self.mh_w_fc1=None
-            self.mh_w_qs2=None
-            self.mh_w_vs2=None
-            self.mh_w_fc2=None    
-        self.decoder_layers = nn.ModuleList([DecoderLayer(embedding_size, config.k_dims, config.v_dims, \
-            config.n_heads, ffn_dim, config.dropout,self.mh_w_qs1,self.mh_w_vs1,self.mh_w_fc1,\
-                self.mh_w_qs2,self.mh_w_vs2,self.mh_w_fc2) for _ in range(config.n_layers)])
-        self.final_transformer_linear = nn.Linear(embedding_size, voc_size, bias=False)
-        self.final_transformer_softmax = nn.Softmax(dim=2)
-
-    def forward(self, decoder_inputs, enc_output,dec_enc_attn_pad_mask=None):
-        #enc_output[B L E]
-        #output:[B L E]
-        output=self.pos_embedding(self.seq_embedding(decoder_inputs))
-        # padding_mask requires that seq_k和seq_q的形状都是[B,L]
-        #self_attention_padding_mask=[B,L,L]
-        self_attention_padding_mask = padding_mask(decoder_inputs).to(Global_device)
-        seq_mask = sequence_mask(decoder_inputs).to(Global_device)
-        #self_attn_mask=[B,L,L]
-        self_attn_mask = (torch.gt((self_attention_padding_mask.float() + seq_mask.float()), 0)).float()
-        # self_attentions = []
-        # context_attentions = []
-        for decoder in self.decoder_layers:
-            output, self_attn, context_attn = decoder(
-            output, enc_output, self_attn_mask, dec_enc_attn_pad_mask)
-            # self_attentions.append(self_attn)
-            # context_attentions.append(context_attn)
-        
-        #transformer forward:
-        #context_attn_mask = padding_mask(tgt_seq, src_seq)
-        #output, enc_self_attn = self.encoder(src_seq, src_len)
-        #output, dec_self_attn, ctx_attn = self.decoder( tgt_seq, tgt_len, output, context_attn_mask)
-        #output = self.linear(output)
-        #output = self.softmax(output)
-        # return output, enc_self_attn, dec_self_attn, ctx_attn
-        output = self.final_transformer_linear(output)
-        output = self.final_transformer_softmax(output)
-        return output.view(-1, output.size(-1))
-        # return output, self_attentions, context_attentions
+        for layer in self.layerstack:
+            output = layer(output,self_attn_mask=slf_attn_mask,enc_out=enc_output,enc_dec_mask=enc_dec_mask)
+        return output
+class Transformer(nn.Module):
+    def __init__(self, config,voc_Size):
+        super().__init__() 
+        self.config=config
+        self.char_embedding= Embeddings(voc_Size,config.embedding_size)
+        self.encoder=TransformerEncoder(config,voc_Size,self.char_embedding)
+        self.decoder=TransformerDecoder(config,voc_Size,self.char_embedding)
+        self.tgt_proj=nn.Linear(config.embedding_size, voc_Size, bias=False)
+        self.final_softmax = nn.Softmax(dim=2)
+    def call(self,Q,A):
+        enc_output=self.encoder(Q)
+        dec_input=A[:,:-1]
+        dec_target=A[:,1:]
+        dec_input= dec_input.to(Global_device)
+        dec_target= dec_target.to(Global_device)
+        dec_out=self.decoder(dec_input,enc_output,Q)
+        dec_logits = self.final_softmax(self.tgt_proj(dec_out)) 
+        preds=dec_logits.contiguous().view(dec_logits.size(0)*dec_logits.size(1),-1)
+        tars=dec_target.contiguous().view(-1)
+        loss= F.cross_entropy(preds,tars)
+        return loss
+    def train(self,train_loader,optimizer):
+        start_epoch=0
+        stage_total_loss=0
+        for epoch in range(start_epoch,self.config.end_epoch):
+            for batch_idx,batch in enumerate(train_loader):
+                batch_idx+=1
+                optimizer.zero_grad()
+                batchQ,batchA=batch["history"],batch["response"]
+                batchQ = pad_sequence(batchQ,batch_first=True, padding_value=0).to(Global_device)
+                batchA = pad_sequence(batchA,batch_first=True, padding_value=0).to(Global_device)
+                loss=self.call(batchQ,batchA)
+                loss.backward()
+                optimizer.step_and_update_lr()
+                stage_total_loss+=loss.cpu().item() 
+                if batch_idx % self.config.log_steps == 0:
+                    print_loss_avg = (stage_total_loss / self.config.log_steps)
+                    print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}\ttime: {}'.format(
+                        epoch, batch_idx , len(train_loader),
+                        100. * batch_idx / len(train_loader), print_loss_avg, time.asctime(time.localtime(time.time())) ))
+                    with open(self.config.logfile_path,'a') as f:
+                        template=' Train Epoch: {} [{}/{}]\tLoss: {:.6f}\ttime: {}\n'
+                        str=template.format(epoch,batch_idx , len(train_loader),print_loss_avg,\
+                            time.asctime(time.localtime(time.time())))
+                        f.write(str)
+                    stage_total_loss=0

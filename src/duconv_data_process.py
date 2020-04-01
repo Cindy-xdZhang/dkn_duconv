@@ -120,7 +120,6 @@ def data_preprocess(path_raw,text_file,topic_file,topic_generalization=True,test
                         sample["history"] = conversation[:j]
                         sample["response"] = conversation[j]
 
-                        get_target_kg(sample)
                         
                         topic_a =  sample["goal"][0][1]
                         topic_b =  sample["goal"][0][2]
@@ -148,7 +147,8 @@ def data_preprocess(path_raw,text_file,topic_file,topic_generalization=True,test
                                 sample["knowledge"] = tokenize(generize(sample["knowledge"],value, key))
                                 sample["history"] =  tokenize(generize(sample["history"],value, key))
                                 sample["response"] =  tokenize(generize(sample["response"],value, key))
-                                # model_text = model_text.replace(value, key)    
+                                # model_text = model_text.replace(value, key)   
+                        get_target_kg(sample)      
                         topic_dict = json.dumps(topic_dict, ensure_ascii=False)
                         model_text=json.dumps(sample, ensure_ascii=False)
                         fout_text.write(model_text + "\n")
@@ -189,6 +189,7 @@ def data_preprocess(path_raw,text_file,topic_file,topic_generalization=True,test
                             sample["history"] =  tokenize(generize(sample["history"],value, key))
                             sample["response"] =  tokenize(generize(sample["response"],value, key))
                             # model_text = model_text.replace(value, key)     
+                    get_target_kg(sample) 
                     topic_dict = json.dumps(topic_dict, ensure_ascii=False)
                     model_text=json.dumps(sample, ensure_ascii=False)
                     fout_text.write(model_text + "\n")
@@ -200,21 +201,33 @@ def data_preprocess(path_raw,text_file,topic_file,topic_generalization=True,test
 
     sample2multi_generize_topic(path_raw,text_file,topic_file)
 
-#TODO:
+# #TODO:
 def get_target_kg(dataitem,beam=3):
     goal=dataitem['goal']
     kg=dataitem['knowledge']
-    kg_chose=[0]*len(kg)
+    kg_chose_count=[0]*len(kg)
     his=dataitem['history']
     res=dataitem['response']
-    query=his+goal if len(his) !=0 else goal
+    # query=his+goal if len(his) !=0 else goal
     RES=res.split()
+    # print("knowledge",kg)
     for i, [S, P, O] in enumerate(kg):
-        for  s in S.split():if s is in RES:kg_chose[i]+=1
-        for  p in P.split():if p is in RES:kg_chose[i]+=1
-        for  o in O.split():if o is in RES:kg_chose[i]+=1
-        
-
+            if S  in RES:kg_chose_count[i]+=1
+            if P  in RES:kg_chose_count[i]+=1
+            if O  in RES:kg_chose_count[i]+=1
+    # print("kg_chose",kg_chose)
+    chosed_kg=[  ]
+    for t in range(beam):
+        kg_id=kg_chose_count.index(max(kg_chose_count))
+        kg_chose_count[kg_id]=-100
+        chosed_kg.append(kg[kg_id])
+    # print("final chose:", chosed_kg)
+    # print("RES",RES)
+    # print("query",query)
+    goal_str=[ " ".join(it)  for it in goal]
+    dataitem['history']=goal_str+his
+    dataitem['knowledge']=chosed_kg
+   
 
 if __name__ == "__main__":
     try:

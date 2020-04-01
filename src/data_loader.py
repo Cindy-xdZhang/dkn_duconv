@@ -23,12 +23,12 @@ class Dataset(object):
         raise NotImplementedError
 class My_dataset(Dataset):
     # root 是训练集的根目录， mode可选的参数是train，test，validation，分别读取相应的文件夹
-    def __init__(self,  mode="train",dir="C:\\Users\\10718\\PycharmProjects\\dkn_duconv\\duconv_data",voc_save_path="dkn_duconv/"):
+    def __init__(self,  mode="train",dir="C:\\Users\\10718\\PycharmProjects\\dkn_duconv\\duconv_data",voc_save_path="dkn_duconv/",voc=None):
         self.mode = mode
         self.dir = dir
-        self.data,self.voc=self.build_corpus_data(voc_save_path)
+        self.data,self.voc=self.build_corpus_data(voc_save_path,voc=voc)
     #学习DUCONV把 每个item多个konwledge三元组 join成空格分隔的一个长句子
-    def build_corpus_data(self,voc_save_path):
+    def build_corpus_data(self,voc_save_path,voc):
         text_path1=os.path.join(self.dir,"text."+"train"+".txt")
         text_path2=os.path.join(self.dir,"text."+"dev"+".txt")
         text_path3=os.path.join(self.dir,"text."+"test"+".txt") 
@@ -37,7 +37,8 @@ class My_dataset(Dataset):
         test_data=parse_json_txtfile(text_path3)
         all_data=train_data+dev_data+test_data
         # voc=word_index(train_data,voc_save_path+"1")# 54941
-        voc=word_index(all_data,voc_save_path)#62008
+        if voc is None: vocab=word_index(all_data,voc_save_path)#62008
+        else: vocab=voc
         if self.mode=="train":
             data=train_data
         elif self.mode=="dev":
@@ -50,8 +51,8 @@ class My_dataset(Dataset):
             item.pop('goal')
         #对response,history,knowkedge idx化但不padding，
         # 后续进网络每个batch交给torch.nn.utils.rnn.pad_sequence 进行padding
-        voc.idx_corpus(data)
-        return data,voc
+        vocab.idx_corpus(data)
+        return data,vocab
     def __getitem__(self, index):
         return self.data[index]
     def __len__(self):
