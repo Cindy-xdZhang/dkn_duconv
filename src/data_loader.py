@@ -37,7 +37,9 @@ class My_dataset(Dataset):
         test_data=parse_json_txtfile(text_path3)
         all_data=train_data+dev_data+test_data
         # voc=word_index(train_data,voc_save_path+"1")# 54941
-        if voc is None: vocab=word_index(all_data,voc_save_path)#62008
+        if voc is None:
+            vocab=word_index(all_data,voc_save_path)#62008"""
+            print("-Vocsize = "+str(vocab.n_words))
         else: vocab=voc
         if self.mode=="train":
             data=train_data

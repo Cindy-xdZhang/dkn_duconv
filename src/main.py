@@ -21,7 +21,7 @@ from utils import *
 from test import test_model
 torch.backends.cudnn.enabled = True
 torch.backends.cudnn.benchmark = True
-WORD_EMBEDDING_DIM_NO_PRETRAIN=25
+WORD_EMBEDDING_DIM_NO_PRETRAIN=16
 def arg_config():
     def print_config_information(config):
         print('======================model===============================')
@@ -53,11 +53,11 @@ def arg_config():
     net_arg.add_argument("-m","--model_type", type=str, default='gru',
                          choices=['trans', 'gru'])
     net_arg.add_argument('-eb',"--embedding_size", type=int, default=128,help="for transformer")
-    net_arg.add_argument('-hi',"--hidden_size", type=int, default=128)
+    net_arg.add_argument('-hi',"--hidden_size", type=int, default=256)
     net_arg.add_argument("--n_layers", type=int, default=1)
     net_arg.add_argument("--attn", type=str, default='general',
                          choices=['none', 'concat', 'dot', 'general'])
-    net_arg.add_argument("--dropout", type=float, default=0)
+    net_arg.add_argument('-d',"--dropout", type=float, default=0.1)
     net_arg.add_argument("--k_dims", type=int, default=64)
     net_arg.add_argument("--v_dims", type=int, default=64)
     net_arg.add_argument("--n_heads", type=int, default=8)
@@ -68,7 +68,7 @@ def arg_config():
     # Training / Testing CMD参数组
     train_arg = parser.add_argument_group("Training")
     train_arg.add_argument("--n_warmup_steps", type=int, default=4000)
-    train_arg.add_argument('-bs',"--batch_size", type=int, default=10)
+    train_arg.add_argument('-bs',"--batch_size", type=int, default=16)
     train_arg.add_argument('-r',"--run_type", type=str, default="train",
      choices=['train', 'test'])
     train_arg.add_argument('-lr',"--lr", type=float, default=0.001)
@@ -81,14 +81,14 @@ def arg_config():
     misc_arg = parser.add_argument_group("Misc")
     misc_arg.add_argument('-u', "--use_gpu", type=str2bool, default=True)
     misc_arg.add_argument('-p',"--log_steps", type=int, default=10)
-    misc_arg.add_argument('-s',"--save_iteration", type=int, default=500,help='Every save_iteration iteration(s) save checkpoint model ')   
+    misc_arg.add_argument('-s',"--save_iteration", type=int, default=1000,help='Every save_iteration iteration(s) save checkpoint model ')   
     #路径参数
     misc_arg.add_argument('-i',"--data_dir", type=str,  default=os.path.join(project_root_dir,"duconv_data"),\
         help="The input text data path.")
     misc_arg.add_argument("--voc_and_embedding_save_path", type=str,  default=project_root_dir,help="The path for voc and embedding file.")
     misc_arg.add_argument("--output_path", type=str, default=os.path.join(project_root_dir,"output"))
     misc_arg.add_argument("--save_model_path", type=str, default=os.path.join(project_root_dir,"models"))
-    misc_arg.add_argument('-con',"--continue_training", type=str, default="dkn_duconv\\models\\gru\\L1_H128_general\\Epo_01_iter_003000.tar")
+    misc_arg.add_argument('-con',"--continue_training", type=str, default=" ")
     misc_arg.add_argument('-log',"--logfile_path", type=str, default=os.path.join(project_root_dir,"log.txt"))
     config = parser.parse_args()
     print_config_information(config)

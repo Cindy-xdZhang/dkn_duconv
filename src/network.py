@@ -81,6 +81,7 @@ class EncoderRNN(nn.Module):
         super(EncoderRNN, self).__init__()
         self.n_layers = n_layers
         self.hidden_size = hidden_size
+        self.dropout = nn.Dropout(p=dropout)
         self.gru_KG = nn.GRU(embedding_size, hidden_size, n_layers,
                         dropout=(0 if n_layers == 1 else dropout), bidirectional=True,batch_first =False)
         self.gru_History = nn.GRU(embedding_size, hidden_size, n_layers,
@@ -105,30 +106,35 @@ class EncoderRNN(nn.Module):
         unsort_idx_history,unsort_idx_kg=unsort_idxs
         #kg
         #input_kg_seq_embedded [seq,batchsize, embeddingsize]
-        input_kg_seq_embedded = self.embedding(input_kg_seq)
+        # input_kg_seq_embedded = self.embedding(input_kg_seq)
+        # input_kg_seq_embedded = input_kg_seq
         #【seq*batch*embed_dim】
-        input_kg_seq_packed = torch.nn.utils.rnn.pack_padded_sequence(input_kg_seq_embedded, input_kg_lengths,batch_first=False)
+        input_kg_seq= self.dropout(input_kg_seq)
+        input_kg_seq_packed = torch.nn.utils.rnn.pack_padded_sequence(input_kg_seq, input_kg_lengths,batch_first=False)
         #GRU的 output: (seq_len, batch, hidden*n_dir) ,
         # hidden_kg=( num_layers * num_directions, batch,hidden_size)
         kg_outputs,hidden_kg=self.gru_KG(input_kg_seq_packed, None) 
         kg_outputs, _ = torch.nn.utils.rnn.pad_packed_sequence(kg_outputs,batch_first=False )
         kg_outputs=kg_outputs.index_select(1,unsort_idx_kg)
         hidden_kg=hidden_kg.index_select(1,unsort_idx_kg)
+
+        
         kg_outputs = kg_outputs[:, :, :self.hidden_size] + kg_outputs[:, : ,self.hidden_size:] # Sum bidirectional outputs ( batch,1, hidden)
         
         #history
-        input_history_seq_embedded = self.embedding(input_history_seq)
-        input_history_seq_packed = torch.nn.utils.rnn.pack_padded_sequence(input_history_seq_embedded, input_history_lengths,batch_first=False)
+        # input_history_seq_embedded=input_history_seq
+        # input_history_seq_embedded = self.embedding(input_history_seq)
+        input_history_seq_packed = torch.nn.utils.rnn.pack_padded_sequence(input_history_seq, input_history_lengths,batch_first=False)
         his_outputs, hidden_his= self.gru_History(input_history_seq_packed, None)
         his_outputs, _ = torch.nn.utils.rnn.pad_packed_sequence(his_outputs,batch_first=False)
         his_outputs=his_outputs.index_select(1,unsort_idx_history)
         hidden_his=hidden_his.index_select(1,unsort_idx_history)
         his_outputs = his_outputs[:, :, :self.hidden_size] + his_outputs[:, : ,self.hidden_size:] # Sum bidirectional outputs (batch, 1, hidden)
         # hidden_kg=(num_layers * num_directions,batch,  hidden_size)
-        concat_hidden=torch.cat((hidden_his, hidden_kg),1).reshape(self.n_layers*2,-1, self.hidden_size*2)
-        hidden=self.W1(concat_hidden)
-        outputs=self.W2(torch.cat((his_outputs, kg_outputs), 0))
-        return outputs, hidden
+        # concat_hidden=torch.cat((hidden_his, hidden_kg),1).reshape(self.n_layers*2,-1, self.hidden_size*2)
+        # hidden=self.W1(concat_hidden)
+        # outputs=self.W2(torch.cat((his_outputs, kg_outputs), 0))
+        return his_outputs, hidden_his,kg_outputs,hidden_kg
 class Attn(nn.Module):
     def __init__(self, method, hidden_size):
         super(Attn, self).__init__()
@@ -189,21 +195,25 @@ class LuongAttnDecoderRNN(nn.Module):
         # self.embedding_dropout = nn.Dropout(dropout)
         self.gru = nn.GRU(embedding_size, hidden_size, n_layers,\
             dropout=(0 if n_layers == 1 else dropout), batch_first=False)
+        self.gru_kg = nn.GRU(embedding_size, hidden_size, n_layers,\
+            dropout=(0 if n_layers == 1 else dropout), batch_first=False)
         self.concat = nn.Linear(hidden_size * 2, hidden_size)
-        self.out = nn.Linear(hidden_size, output_size)
+        self.out = nn.Linear(2*hidden_size, output_size)
 
         # Choose attention model
         if attn_model != 'none':
             self.attn = Attn(attn_model, hidden_size)
 
-    def forward(self, input_seq_embedded, last_hidden, encoder_outputs):
+    def forward(self, input_seq_embedded, last_hidden_his,last_hidden_kg, encoder_outputs):
         # Note: we run this one step at a time
         # embedded = self.embedding_dropout(embedded) 
 
         # Get current hidden state from input word and last hidden state
         #batch_first=True 不影响hidden初始化的格式是(num_layers * num_directions, batch, hidden_size)
-        rnn_output, hidden = self.gru(input_seq_embedded, last_hidden)
-
+        rnn_output, hidden = self.gru(input_seq_embedded, last_hidden_his)
+        rnn_output_kg, hidden_kg = self.gru_kg(input_seq_embedded, last_hidden_kg)
+        rnn_output_kg = rnn_output_kg.squeeze(0)
+        
         # Calculate attention from current RNN state and all encoder outputs;
         # apply to encoder outputs to get weighted average
         attn_weights = self.attn(rnn_output, encoder_outputs) #[batchsize, 1, 14]
@@ -218,7 +228,7 @@ class LuongAttnDecoderRNN(nn.Module):
         concat_output = torch.tanh(self.concat(concat_input)) #[64, 512]
 
         # Finally predict next token (Luong eq. 6, without softmax)
-        output = self.out(concat_output) #[batchsize, output_size(vocabularysize)]
+        output = self.out(torch.cat((concat_output, rnn_output_kg), 1)) #[batchsize, output_size(vocabularysize)]
 
         # Return final output, hidden state, and attention weights (for visualization)
         return output, hidden, attn_weights
@@ -233,7 +243,7 @@ class GRU_Encoder_Decoder(nn.Module):
         self.embedding=nn.Embedding(voc_size, WORD_EMBEDDING_DIMs,padding_idx=PAD_token)
         if config.pre_train_embedding==True:self.embedding.weight.data.copy_(torch.from_numpy(\
             build_embedding(voc,config.voc_and_embedding_save_path)))
-        self.encoder=EncoderRNN_noKG(config.hidden_size,WORD_EMBEDDING_DIMs,config.n_layers,config.dropout)
+        self.encoder=EncoderRNN(config.hidden_size,WORD_EMBEDDING_DIMs,config.n_layers,config.dropout)
         self.decoder=LuongAttnDecoderRNN(config.attn,WORD_EMBEDDING_DIMs, config.hidden_size, voc_size, n_layers=config.n_layers, dropout=config.dropout)
         encoder_para = sum([np.prod(list(p.size())) for p in self.encoder.parameters()])
         decoder_para = sum([np.prod(list(p.size())) for p in self.decoder.parameters()])
@@ -265,12 +275,14 @@ class GRU_Encoder_Decoder(nn.Module):
         # encoder_hidden=[ (direction*layer),batchsie,hiddensize]
         unsort_idxs=(idx_unsort1,idx_unsort2)
         history= self.embedding(history)
-        encoder_outputs, encoder_hidden = self.encoder(history,len_history,knowledge,len_knowledge,unsort_idxs)
+        knowledge= self.embedding(knowledge)
+        encoder_outputs, encoder_hidden,kg_outputs,hidden_kg = self.encoder(history,len_history,knowledge,len_knowledge,unsort_idxs)
 
         decoder_input = torch.LongTensor([SOS_token for _ in range(batch_size)]).reshape(1,batch_size) #[batch_size,1]
         decoder_input = decoder_input.to(Global_device)
         #decoder 不用双向
         decoder_hidden = encoder_hidden[:self.decoder.n_layers]
+        hidden_kg= hidden_kg[:self.decoder.n_layers]
         loss=0
         MAX_RESPONSE_LENGTH=int(len_response[0].item())-1
         responses=responses.index_select(1,idx_unsort3)
@@ -279,7 +291,7 @@ class GRU_Encoder_Decoder(nn.Module):
             for t in range(MAX_RESPONSE_LENGTH):
                 decoder_input= self.embedding(decoder_input)
                 decoder_output, decoder_hidden, decoder_attn = self.decoder(
-                    decoder_input, decoder_hidden, encoder_outputs
+                    decoder_input, decoder_hidden,hidden_kg, encoder_outputs
                 )
                 #topi为概率最大词汇的下标
                 _, topi = decoder_output.topk(1) # [batch_Size, 1]
@@ -292,7 +304,7 @@ class GRU_Encoder_Decoder(nn.Module):
             for t in range(MAX_RESPONSE_LENGTH):
                 decoder_input= self.embedding(decoder_input)
                 decoder_output, decoder_hidden, decoder_attn = self.decoder(
-                    decoder_input, decoder_hidden, encoder_outputs
+                    decoder_input, decoder_hidden, hidden_kg, encoder_outputs
                 )
                 decoder_input = responses[t+1].view(1, -1) # Next input is current target
                 decoder_input = decoder_input.to(Global_device)  

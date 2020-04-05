@@ -224,10 +224,13 @@ def get_target_kg(dataitem,beam=3):
     # print("final chose:", chosed_kg)
     # print("RES",RES)
     # print("query",query)
-    goal_str=[ " ".join(it)  for it in goal]
-    dataitem['history']=goal_str+his
-    dataitem['knowledge']=chosed_kg
-   
+    # for gru_nokg#
+    # goal_str=[ " ".join(it)  for it in goal]
+    # dataitem['history']=goal_str+his
+    # dataitem['knowledge']=goal_str+chosed_kg
+    # for gru_withkg#
+    dataitem['knowledge']=goal+chosed_kg
+
 
 if __name__ == "__main__":
     try:

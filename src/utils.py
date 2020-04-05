@@ -30,7 +30,7 @@ class Vocabulary:
         self.name = name
         self.word2index = {"PAD":0 ,"SOS": 1, "EOS":2 }#word转索引，字典，word字符串做查询键值
         # self.word2count = {}#word转频次计数器，似乎没卵用
-        self.index2word = {0: "PAD", 1: "SOS", 2:"EOS"}
+        # self.index2word = {0: "PAD", 1: "SOS", 2:"EOS"}
         self.n_words = 3  # Count SOS and EOS
     def addSentence(self, sentence):
         for word in sentence.split(' '):
@@ -385,3 +385,9 @@ def get_infinite_batches(self, data_loader):
             for i, (images, _) in enumerate(data_loader):
                 yield images    
 # _check_KnowledgeList_and_Vocabulary_implementation()
+
+# import torch
+# x = torch.rand(2,20)
+# y = torch.split(x,[2,5,10,3],dim=1) 
+# print(x)
+# print(y)
